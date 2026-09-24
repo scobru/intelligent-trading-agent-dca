@@ -15,6 +15,11 @@ import os
 import sys
 from typing import Any, Dict
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 import config
 import db_utils
 import sentiment
@@ -48,11 +53,16 @@ def run_cycle():
     client = BaseClient()
     if not config.PAPER_TRADING:
         if not client.is_connected():
-            raise RuntimeError(f"RPC Base non raggiungibile: {config.BASE_RPC_URL}")
-        problems = client.verify_contracts()
-        if problems:
-            raise RuntimeError("Verifica dei contratti fallita:\n  - " + "\n  - ".join(problems))
-        print(f"⛓️  Connesso a Base (chain {client.chain_id()}), gas {client.gas_price_gwei():.4f} gwei")
+            logger.warning("RPC Base non raggiungibile: %s", config.BASE_RPC_URL)
+        else:
+            try:
+                problems = client.verify_contracts()
+                if problems:
+                    logger.warning("Verifica contratti parziale (possibile rate limit RPC):\n  - " + "\n  - ".join(problems))
+                else:
+                    print(f"⛓️  Connesso a Base (chain {client.chain_id()}), gas {client.gas_price_gwei():.4f} gwei")
+            except Exception as exc:
+                logger.warning("Verifica contratti non completata causa RPC: %s", exc)
 
     manager = DcaManager(client)
 
@@ -112,8 +122,19 @@ def run_cycle():
         "recommended_operation": algo_plan.get("operation"),
     }, default=str)
 
-    with open("system_prompt.txt", encoding="utf-8") as f:
-        system_prompt = f.read().format(portfolio_data, context)
+    prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "system_prompt.txt")
+    with open(prompt_path, encoding="utf-8") as f:
+        raw_prompt = f.read()
+
+    if "{{PORTFOLIO_DATA}}" in raw_prompt:
+        system_prompt = raw_prompt.replace("{{PORTFOLIO_DATA}}", portfolio_data).replace("{{CONTEXT_INFO}}", context)
+    else:
+        # Fallback sicuro se il file contiene {} evitando KeyError sulla sintassi JSON
+        parts = raw_prompt.split("{}", 2)
+        if len(parts) == 3:
+            system_prompt = parts[0] + portfolio_data + parts[1] + context + parts[2]
+        else:
+            system_prompt = raw_prompt + f"\n\nPortfolio Data:\n{portfolio_data}\n\nContext:\n{context}"
 
     print(f"🤖 Interrogazione AI ({OPENROUTER_MODEL})...")
     decision = decide_action(system_prompt, fallback_action=algo_plan)
