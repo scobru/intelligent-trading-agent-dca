@@ -217,6 +217,13 @@ class DcaManager:
                 total_spent += amt_usd
             else:
                 # Live swap
+                usdc_bal = self.client.balance_of_float(config.USDC)
+                if usdc_bal < amt_usd:
+                    results.append({
+                        "status": "error",
+                        "reason": f"USDC insufficiente: saldo {usdc_bal:.4f} < richiesto {amt_usd:.2f} per {target_sym}",
+                    })
+                    continue
                 token_out_addr = config.KNOWN_ASSETS[target_sym]["address"]
                 amt_raw = int(amt_usd * 1e6)
                 route = self.uniswap.best_route(config.USDC, token_out_addr, amt_raw)
@@ -261,6 +268,16 @@ class DcaManager:
         # Live swap
         token_in_addr = config.KNOWN_ASSETS[from_sym]["address"]
         token_out_addr = config.KNOWN_ASSETS[to_sym]["address"]
+
+        # Verifica saldo in uscita (per token in) per sicurezza
+        token_in_bal = self.client.balance_of_float(token_in_addr)
+        token_in_price = prices.get(from_sym, 1.0 if from_sym == "USDC" else 0.0)
+        if token_in_bal * token_in_price < amt_usd:
+            return {
+                "status": "error",
+                "reason": f"Saldo insufficiente per {from_sym}: disp {token_in_bal * token_in_price:.2f} < richiesto {amt_usd:.2f}",
+            }
+
         decimals_in = config.KNOWN_ASSETS[from_sym]["decimals"]
         amount_raw = int(qty_from * (10 ** decimals_in))
 
