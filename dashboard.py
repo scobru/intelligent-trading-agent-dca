@@ -301,6 +301,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 status = self.manager.get_status()
+                status["is_paused"] = db_utils.is_bot_paused()
+                status["pause_info"] = db_utils.get_pause_info()
                 self.wfile.write(json.dumps(status, default=str).encode("utf-8"))
             except Exception as exc:
                 self.wfile.write(json.dumps({"error": str(exc)}).encode("utf-8"))
@@ -331,14 +333,63 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         self.send_error(404)
 
+    def _is_auth_valid(self) -> bool:
+        if not RUN_TOKEN:
+            return False
+        token = self.headers.get("X-Run-Token", "") or self.headers.get("X-Admin-Token", "")
+        if not token and "Authorization" in self.headers:
+            auth = self.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                token = auth[7:].strip()
+            else:
+                token = auth.strip()
+        return bool(token and hmac.compare_digest(token, RUN_TOKEN))
+
+    def _send_json(self, status: int, data: Any):
+        body = json.dumps(data, default=str).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/api/run":
-            auth = self.headers.get("Authorization", "").replace("Bearer ", "").strip()
-            if RUN_TOKEN and not hmac.compare_digest(auth, RUN_TOKEN):
-                self.send_response(403)
-                self.end_headers()
-                self.wfile.write(b'{"error": "unauthorized"}')
+        path = parsed.path
+
+        if path not in ("/api/run", "/api/pause", "/api/resume"):
+            self.send_error(404)
+            return
+
+        if not self._is_auth_valid():
+            self._send_json(403, {"error": "unauthorized", "message": "Token non valido o mancante"})
+            return
+
+        if path == "/api/pause":
+            reason = "Pausa richiesta da API"
+            try:
+                clen = int(self.headers.get("Content-Length", 0))
+                if clen > 0:
+                    body = json.loads(self.rfile.read(clen).decode("utf-8"))
+                    reason = body.get("reason", reason)
+            except Exception:
+                pass
+            db_utils.set_bot_paused(True, reason=reason)
+            self._send_json(200, {"status": "success", "is_paused": True, "message": f"Bot DCA in pausa: {reason}"})
+            return
+
+        if path == "/api/resume":
+            db_utils.set_bot_paused(False)
+            self._send_json(200, {"status": "success", "is_paused": False, "message": "Bot DCA riattivato con successo."})
+            return
+
+        if path == "/api/run":
+            if db_utils.is_bot_paused():
+                pinfo = db_utils.get_pause_info()
+                self._send_json(200, {
+                    "status": "paused",
+                    "is_paused": True,
+                    "message": f"Bot DCA attualmente in PAUSA ({pinfo.get('reason', 'Pausa attiva')}). Ciclo ignorato."
+                })
                 return
 
             def _target():
@@ -349,13 +400,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         logger.error("Errore esecuzione main.py: %s", e)
 
             threading.Thread(target=_target, daemon=True).start()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"status": "started"}')
+            self._send_json(200, {"status": "started", "message": "Ciclo DCA avviato in background."})
             return
-
-        self.send_error(404)
 
 
 def run_dashboard():

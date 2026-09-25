@@ -44,6 +44,11 @@ def _format_portfolio_for_prompt(status: Dict[str, Any]) -> str:
 
 
 def run_cycle():
+    if db_utils.is_bot_paused():
+        pinfo = db_utils.get_pause_info()
+        logger.info("⏸️ Bot DCA in stato di PAUSA (%s). Ciclo ignorato.", pinfo.get("reason", "Pausa attiva"))
+        return None
+
     print(f"🚀 Avvio DCA & Rebalancer Agent su Base (wallet: {config.WALLET_ADDRESS or 'paper'})")
     if config.PAPER_TRADING:
         print(f"📝 PAPER TRADING attivo: portafoglio virtuale da ${config.PAPER_START_USDC:.2f} USDC.")
