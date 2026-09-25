@@ -296,3 +296,39 @@ class DcaManager:
             "transactions": [tx],
             "reason": action.get("reason", ""),
         }
+
+    def release_funds(self, target_usdc: float = 0.0) -> Dict[str, Any]:
+        """
+        Vende asset detenuti dal portafoglio DCA per liberare USDC nel wallet.
+        """
+        status = self.get_status()
+        assets = status.get("portfolio", {}).get("assets", {})
+        total_freed = 0.0
+        trades = []
+
+        for sym, data in assets.items():
+            if sym == "USDC":
+                continue
+            if target_usdc > 0 and total_freed >= target_usdc:
+                break
+            val = float(data.get("value_usd", 0.0))
+            if val < getattr(config, "MIN_TRADE_USD", 5.0):
+                continue
+
+            try:
+                res = self._execute_rebalance({"from_asset": sym, "to_asset": "USDC", "amount_usd": val, "reason": "svincolo fondi"}, status)
+                if res.get("status") in ("success", "paper"):
+                    total_freed += val
+                    trades.append({"asset": sym, "freed_usd": val})
+            except Exception as exc:
+                logger.error("Errore vendita DCA %s -> USDC: %s", sym, exc)
+
+        new_status = self.get_status()
+        usdc = float(new_status.get("balances", {}).get("USDC", 0.0))
+        return {
+            "status": "success",
+            "message": f"Liberati ${total_freed:.2f} USDC (saldo attuale: ${usdc:.2f})",
+            "released_usd": round(total_freed, 2),
+            "usdc_balance": round(usdc, 2),
+            "trades": trades
+        }

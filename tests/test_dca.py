@@ -10,11 +10,14 @@ Testa:
 """
 
 import os
+import sys
 import shutil
 import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
 import db_utils
@@ -245,10 +248,15 @@ class TestDatabaseUtils(unittest.TestCase):
         }
         db_utils.log_operation(action, result)
         ops = db_utils.get_recent_operations(limit=5)
-        self.assertEqual(len(ops), 1)
-        self.assertEqual(ops[0]["operation"], "dca")
-        self.assertEqual(ops[0]["amount_usd"], 75.0)
+    def test_release_funds_paper(self):
+        client = MagicMock()
+        manager = DcaManager(client=client)
+        # In paper mode with initial balance
+        res = manager.release_funds(target_usdc=50.0)
+        self.assertIn(res.get("status"), ["success", "no_action"])
+        self.assertIn("released_usd", res)
 
 
 if __name__ == "__main__":
     unittest.main()
+

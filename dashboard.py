@@ -404,7 +404,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/release_funds":
-            self._send_json(200, {"status": "success", "message": "Svincolo USDC non implementato per DCA agent", "released_usd": 0.0})
+            target_amount = 0.0
+            try:
+                clen = int(self.headers.get("Content-Length", 0))
+                if clen > 0:
+                    body = json.loads(self.rfile.read(clen).decode("utf-8"))
+                    target_amount = float(body.get("amount_usd", 0.0) or body.get("amount", 0.0))
+            except Exception:
+                pass
+            try:
+                from base_client import BaseClient
+                from dca_manager import DcaManager
+                client = BaseClient()
+                manager = DcaManager(client)
+                res = manager.release_funds(target_usdc=target_amount)
+                self._send_json(200, res)
+            except Exception as exc:
+                self._send_json(500, {"status": "error", "message": str(exc)})
             return
 
 
