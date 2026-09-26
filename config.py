@@ -108,6 +108,12 @@ TARGET_WEIGHTS = _parse_target_weights(
     os.getenv("TARGET_WEIGHTS", "WETH:0.25,CBBTC:0.25,LINK:0.15,UNI:0.10,AERO:0.10,USDC:0.15")
 )
 
+# ---------------------------------------------------------------- allocazione tattica AI
+AI_TACTICAL_WEIGHTS_ENABLED = _b("AI_TACTICAL_WEIGHTS_ENABLED", True)
+AI_RECALIBRATE_INTERVAL_HOURS = _f("AI_RECALIBRATE_INTERVAL_HOURS", 24.0)
+MIN_ASSET_WEIGHT = _f("MIN_ASSET_WEIGHT", 0.05)
+MAX_ASSET_WEIGHT = _f("MAX_ASSET_WEIGHT", 0.45)
+
 # ---------------------------------------------------------------- DCA dinamico (Fear & Greed)
 DCA_ENABLED = _b("DCA_ENABLED", True)
 DCA_BASE_AMOUNT_USD = _f("DCA_BASE_AMOUNT_USD", 50.0)         # Importo base di acquisto per ciclo DCA

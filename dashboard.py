@@ -82,6 +82,7 @@ HTML = r"""<!DOCTYPE html>
   </div>
   <div class="header-actions">
     <span class="updated" id="updated"></span>
+    <button class="btn" id="recal-btn" style="background:#4f46e5; border-color:#6366f1; margin-right:6px;">🧠 Ricalibra Pesi AI</button>
     <button class="btn" id="run">⚡ Esegui ciclo ora</button>
   </div>
 </header>
@@ -114,7 +115,7 @@ HTML = r"""<!DOCTYPE html>
 
 <div class="grid-2">
   <section class="card">
-    <div class="card-head"><h2>📊 Composizione Portafoglio vs Target</h2><small>Asset detenuti su Base</small></div>
+    <div class="card-head"><h2>📊 Composizione Portafoglio vs Target</h2><small id="weights-sub" style="display:block; color:var(--text-muted); font-size:0.75rem; margin-top:2px;">Asset detenuti su Base</small></div>
     <div class="table-wrap"><table>
       <thead><tr><th>Asset</th><th>Saldo</th><th>Prezzo</th><th>Valore</th><th>Attuale</th><th>Target</th><th>Drift</th><th>Stato</th></tr></thead>
       <tbody id="assets"></tbody>
@@ -182,6 +183,9 @@ function renderStatus(s) {
   // Gas reserve pill
   if (s.gas_eth && s.gas_eth.amount != null) {
     $('gas-pill').textContent = `⛽ Gas: ${Number(s.gas_eth.amount).toFixed(4)} ETH (${usd(s.gas_eth.value_usd)})`;
+  }
+  if ($('weights-sub')) {
+    $('weights-sub').textContent = 'AI Allocator: ' + (s.weights_rationale || 'Pesi bilanciati di default');
   }
 
   // Assets table
@@ -264,6 +268,20 @@ $('run').addEventListener('click', async () => {
       setTimeout(refresh, 2500);
     } else {
       alert('Avvio rifiutato (token non valido).');
+    }
+  } catch(e) { alert('Errore: ' + e); }
+});
+
+$('recal-btn').addEventListener('click', async () => {
+  const token = prompt('Inserisci il DASHBOARD_RUN_TOKEN (se configurato):') || '';
+  try {
+    const res = await fetch('/api/ai_recalibrate', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      alert('🎯 Pesi aggiornati con successo dall\'AI!\n\nRationale: ' + (data.rationale || ''));
+      refresh();
+    } else {
+      alert('Ricalibrazione: ' + (data.message || data.error || 'Errore o autorizzazione negata'));
     }
   } catch(e) { alert('Errore: ' + e); }
 });
@@ -361,12 +379,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path not in ("/api/run", "/api/pause", "/api/resume", "/api/release_funds"):
+        if path not in ("/api/run", "/api/pause", "/api/resume", "/api/release_funds", "/api/recalibrate_weights", "/api/ai_recalibrate"):
             self.send_error(404)
             return
 
         if not self._is_auth_valid():
             self._send_json(403, {"error": "unauthorized", "message": "Token non valido o mancante"})
+            return
+
+        if path in ("/api/recalibrate_weights", "/api/ai_recalibrate"):
+            try:
+                from base_client import BaseClient
+                from dca_manager import DcaManager
+                client = DashboardHandler.client or BaseClient()
+                manager = DashboardHandler.manager or DcaManager(client)
+                res = manager.recalibrate_weights(force=True)
+                self._send_json(200, res)
+            except Exception as exc:
+                logger.error("Errore ricalibrazione pesi: %s", exc)
+                self._send_json(500, {"status": "error", "message": str(exc)})
             return
 
         if path == "/api/pause":

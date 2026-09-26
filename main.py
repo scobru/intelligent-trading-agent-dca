@@ -82,6 +82,19 @@ def run_cycle():
     # 1. Lettura dello stato del portafoglio
     print("👛 Calcolo quote di portafoglio e verifica drift...")
     status = manager.get_status()
+
+    # 1b. Ricalibrazione Tattica dei Pesi con AI se dovuta
+    if status.get("recalibrate_due"):
+        print("🧠 Verifica ricalibrazione tattica pesi con AI...")
+        try:
+            recal_res = manager.recalibrate_weights()
+            if recal_res.get("status") == "success":
+                print(f"🎯 Pesi aggiornati dall'AI ({recal_res.get('source')}): {recal_res.get('target_weights')}")
+                print(f"   Rationale: {recal_res.get('rationale')}")
+                status = manager.get_status()
+        except Exception as exc:
+            logger.warning("Ricalibrazione pesi AI non riuscita: %s", exc)
+
     total_usd = status["total_value_usd"]
     fng = status["sentiment"]
 
@@ -110,11 +123,13 @@ def run_cycle():
     print(f"💡 Piano algoritmico: {algo_plan.get('operation').upper()} - {algo_plan.get('reason')}")
 
     # 4. Prompt per il modello decisionale
+    active_target_weights = status["portfolio"].get("target_weights", config.TARGET_WEIGHTS)
     context = (
         f"<portafoglio_dettaglio>\n{_format_portfolio_for_prompt(status)}\n</portafoglio_dettaglio>\n\n"
         f"<sentiment>\n{sentiment.format_sentiment_for_prompt(fng)}\n</sentiment>\n\n"
         f"<regole_esecutore>\n"
-        f"Pesi obiettivo: {json.dumps(config.TARGET_WEIGHTS)}\n"
+        f"Pesi obiettivo correnti: {json.dumps(active_target_weights)}\n"
+        f"Rationale pesi: {status.get('weights_rationale', 'Standard')}\n"
         f"Soglia ribilanciamento: {config.REBALANCE_THRESHOLD_PCT:.1f}% drift, min ${config.MIN_REBALANCE_USD:.0f}, max ${config.MAX_REBALANCE_USD:.0f}\n"
         f"DCA base: ${config.DCA_BASE_AMOUNT_USD:.2f} ogni {config.DCA_INTERVAL_HOURS:.0f}h\n"
         f"Ore dall'ultimo DCA: {status.get('hours_since_last_dca') or 'n/d'}\n"

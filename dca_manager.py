@@ -72,6 +72,13 @@ class DcaManager:
             time_since_reb >= config.MIN_HOLD_HOURS_BETWEEN_REBALANCE * 3600.0
         )
 
+        # Recalibration eligibility check
+        last_recal = float(eval_data.get("last_weight_recalibrate_time", 0.0))
+        time_since_recal = now - last_recal
+        recalibrate_due = config.AI_TACTICAL_WEIGHTS_ENABLED and (
+            last_recal == 0 or time_since_recal >= config.AI_RECALIBRATE_INTERVAL_HOURS * 3600.0
+        )
+
         status = {
             "wallet": self.client.address if self.client else "",
             "mode": mode,
@@ -82,15 +89,57 @@ class DcaManager:
             "sentiment": fng,
             "dca_due": dca_due,
             "rebalance_due": reb_due,
+            "recalibrate_due": recalibrate_due,
+            "weights_rationale": eval_data.get("weights_rationale", ""),
             "gas_eth": eval_data.get("gas_eth", {}),
             "hours_since_last_dca": round(time_since_dca / 3600.0, 1) if eval_data.get("last_dca_time") else None,
             "hours_since_last_rebalance": round(time_since_reb / 3600.0, 1) if eval_data.get("last_rebalance_time") else None,
+            "hours_since_last_recalibrate": round(time_since_recal / 3600.0, 1) if last_recal else None,
         }
 
         if self.paper:
             status["paper"] = self.paper.summary(prices)
 
         return status
+
+    def recalibrate_weights(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Ricalibra i pesi target del basket con l'AI o la matrice quantitativa.
+        """
+        import dca_agent
+        if not config.AI_TACTICAL_WEIGHTS_ENABLED and not force:
+            return {"status": "disabled", "message": "AI Tactical Weights disabilitato da configurazione"}
+
+        status = self.get_status()
+        now = time.time()
+        last_time = float(status.get("portfolio", {}).get("last_weight_recalibrate_time", 0.0))
+        interval_sec = config.AI_RECALIBRATE_INTERVAL_HOURS * 3600.0
+
+        if not force and last_time > 0 and (now - last_time < interval_sec):
+            hours_left = round((interval_sec - (now - last_time)) / 3600.0, 1)
+            return {
+                "status": "noop",
+                "message": f"Ricalibrazione non dovuta (prossima tra {hours_left}h)",
+                "target_weights": self.tracker.get_target_weights(),
+                "weights_rationale": self.tracker.state.get("weights_rationale", "")
+            }
+
+        res = dca_agent.recalibrate_weights_ai(
+            portfolio_summary=status,
+            sentiment_data=status.get("sentiment", {}),
+            current_weights=self.tracker.get_target_weights()
+        )
+        new_weights = res.get("target_weights", {})
+        rationale = res.get("rationale", "")
+        updated = self.tracker.update_target_weights(new_weights, rationale)
+
+        return {
+            "status": "success",
+            "operation": "recalibrate_weights",
+            "target_weights": updated,
+            "rationale": rationale,
+            "source": res.get("source", "ai")
+        }
 
     # ------------------------------------------------------------ pianificazione DCA
     def plan_dca(self, status: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -113,8 +162,9 @@ class DcaManager:
         if total_dca_usd < config.MIN_REBALANCE_USD:
             return None
 
-        # Ripartisci tra gli asset non-USDC target in base ai pesi o al drift
-        target_assets = {k: v for k, v in config.TARGET_WEIGHTS.items() if k != "USDC"}
+        # Ripartisci tra gli asset non-USDC target in base ai pesi attivi o al drift
+        active_weights = status.get("portfolio", {}).get("target_weights") or self.tracker.get_target_weights()
+        target_assets = {k: v for k, v in active_weights.items() if k != "USDC"}
         sum_targets = sum(target_assets.values())
         if sum_targets <= 0:
             return None

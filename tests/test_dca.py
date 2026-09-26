@@ -274,6 +274,48 @@ class TestDatabaseUtils(unittest.TestCase):
         self.assertIn("released_usd", res)
 
 
+class TestTacticalWeights(unittest.TestCase):
+    def test_quantitative_fallback_weights(self):
+        import dca_agent
+        # Test Extreme Fear
+        res_fear = dca_agent.get_quantitative_fallback_weights(20)
+        w_fear = res_fear["target_weights"]
+        self.assertAlmostEqual(sum(w_fear.values()), 1.0, places=3)
+        self.assertGreater(w_fear["CBBTC"], w_fear["AERO"])
+
+        # Test Greed
+        res_greed = dca_agent.get_quantitative_fallback_weights(70)
+        w_greed = res_greed["target_weights"]
+        self.assertAlmostEqual(sum(w_greed.values()), 1.0, places=3)
+        self.assertGreater(w_greed["AERO"], w_fear["AERO"])
+
+    def test_portfolio_tracker_custom_weights(self):
+        temp_dir = tempfile.mkdtemp()
+        state_file = os.path.join(temp_dir, "test_portfolio.json")
+        try:
+            tracker = PortfolioTracker(MagicMock(), MagicMock(), state_path=state_file)
+            custom_weights = {"WETH": 0.30, "CBBTC": 0.30, "LINK": 0.20, "USDC": 0.20}
+            updated = tracker.update_target_weights(custom_weights, rationale="Test AI rationale")
+            self.assertEqual(tracker.get_target_weights(), updated)
+            self.assertEqual(tracker.state.get("weights_rationale"), "Test AI rationale")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_manager_recalibrate_weights(self):
+        client = MagicMock()
+        client.balance_of_float.return_value = 0.0
+        client.eth_balance.return_value = 0.0
+        manager = DcaManager(client=client)
+        manager._prices = {
+            "USDC": 1.0, "WETH": 2500.0, "CBBTC": 60000.0, "ETH": 2500.0,
+            "LINK": 15.0, "UNI": 10.0, "AERO": 1.0,
+        }
+        res = manager.recalibrate_weights(force=True)
+        self.assertEqual(res["status"], "success")
+        self.assertIn("target_weights", res)
+        self.assertAlmostEqual(sum(res["target_weights"].values()), 1.0, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()
 

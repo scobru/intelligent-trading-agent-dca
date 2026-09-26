@@ -65,6 +65,26 @@ class PortfolioTracker:
         self.state["rebalance_count"] = int(self.state.get("rebalance_count", 0)) + 1
         self.save()
 
+    def get_target_weights(self) -> Dict[str, float]:
+        """Restituisce i pesi target correnti (personalizzati/AI o di default)."""
+        stored = self.state.get("target_weights")
+        if stored and isinstance(stored, dict) and sum(stored.values()) > 0:
+            return dict(stored)
+        return dict(config.TARGET_WEIGHTS)
+
+    def update_target_weights(self, new_weights: Dict[str, float], rationale: str = "") -> Dict[str, float]:
+        """Aggiorna i pesi target tattici e persiste lo stato."""
+        total = sum(new_weights.values())
+        if total <= 0:
+            return self.get_target_weights()
+        normalized = {k: round(v / total, 4) for k, v in new_weights.items()}
+        self.state["target_weights"] = normalized
+        self.state["weights_rationale"] = rationale
+        self.state["last_weight_recalibrate_time"] = time.time()
+        self.save()
+        logger.info("Pesi target aggiornati: %s (motivo: %s)", normalized, rationale)
+        return normalized
+
     def get_prices(self) -> Dict[str, float]:
         """Prezzi USD dei token target (USDC = 1.0)."""
         prices = {"USDC": 1.0}
@@ -109,7 +129,7 @@ class PortfolioTracker:
             eth_price = 0.0
         gas_eth_val = gas_eth_qty * eth_price
 
-        target_weights = dict(config.TARGET_WEIGHTS)
+        target_weights = self.get_target_weights()
 
         # Includi tutti gli asset target e gli asset detenuti con saldo significativo (> $0.10)
         # Esclude ETH nativo se non ha un peso target specifico (riservato al gas)
@@ -181,6 +201,8 @@ class PortfolioTracker:
             "overweight_symbols": overweight,
             "underweight_symbols": underweight,
             "target_weights": target_weights,
+            "weights_rationale": self.state.get("weights_rationale", "Pesi di default"),
+            "last_weight_recalibrate_time": self.state.get("last_weight_recalibrate_time", 0.0),
             "last_dca_time": self.state.get("last_dca_time", 0.0),
             "last_rebalance_time": self.state.get("last_rebalance_time", 0.0),
             "dca_count": self.state.get("dca_count", 0),
