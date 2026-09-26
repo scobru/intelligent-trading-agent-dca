@@ -259,6 +259,9 @@ class TestDatabaseUtils(unittest.TestCase):
         }
         db_utils.log_operation(action, result)
         ops = db_utils.get_recent_operations(limit=5)
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(ops[0]["operation"], "dca")
+
     def test_release_funds_paper(self):
         client = MagicMock()
         client.balance_of_float.return_value = 0.0
@@ -298,6 +301,19 @@ class TestTacticalWeights(unittest.TestCase):
             updated = tracker.update_target_weights(custom_weights, rationale="Test AI rationale")
             self.assertEqual(tracker.get_target_weights(), updated)
             self.assertEqual(tracker.state.get("weights_rationale"), "Test AI rationale")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_portfolio_tracker_record_decision(self):
+        temp_dir = tempfile.mkdtemp()
+        state_file = os.path.join(temp_dir, "test_portfolio.json")
+        try:
+            tracker = PortfolioTracker(MagicMock(), MagicMock(), state_path=state_file)
+            dec = {"operation": "hold", "reason": "Portafoglio bilanciato"}
+            tracker.record_decision(dec)
+            self.assertEqual(tracker.state.get("last_decision", {}).get("operation"), "hold")
+            eval_data = tracker.evaluate({"USDC": 100.0}, {"USDC": 1.0})
+            self.assertEqual(eval_data.get("last_decision", {}).get("reason"), "Portafoglio bilanciato")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

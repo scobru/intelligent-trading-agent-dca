@@ -97,6 +97,8 @@ class DcaManager:
             "hours_since_last_dca": round(time_since_dca / 3600.0, 1) if eval_data.get("last_dca_time") else None,
             "hours_since_last_rebalance": round(time_since_reb / 3600.0, 1) if eval_data.get("last_rebalance_time") else None,
             "hours_since_last_recalibrate": round(time_since_recal / 3600.0, 1) if last_recal else None,
+            "last_decision": eval_data.get("last_decision"),
+            "model": "OpenRouter (google/gemini-2.5-flash)",
         }
 
         if self.paper:
@@ -123,7 +125,8 @@ class DcaManager:
                 "status": "noop",
                 "message": f"Ricalibrazione non dovuta (prossima tra {hours_left}h)",
                 "target_weights": self.tracker.get_target_weights(),
-                "weights_rationale": self.tracker.state.get("weights_rationale", "")
+                "weights_rationale": self.tracker.state.get("weights_rationale", ""),
+                "last_decision": self.tracker.state.get("last_decision"),
             }
 
         res = dca_agent.recalibrate_weights_ai(
@@ -135,12 +138,33 @@ class DcaManager:
         rationale = res.get("rationale", "")
         updated = self.tracker.update_target_weights(new_weights, rationale)
 
+        action = {
+            "operation": "recalibrate_weights",
+            "reason": rationale,
+            "target_weights": updated,
+            "source": res.get("source", "ai"),
+            "created_at": now,
+        }
+        result = {
+            "status": "success",
+            "operation": "recalibrate_weights",
+            "target_weights": updated,
+        }
+        try:
+            import db_utils
+            db_utils.log_operation(action, result)
+        except Exception as exc:
+            logger.warning("Errore salvataggio operazione recalibrate a DB: %s", exc)
+
+        self.tracker.record_decision(action)
+
         return {
             "status": "success",
             "operation": "recalibrate_weights",
             "target_weights": updated,
             "rationale": rationale,
-            "source": res.get("source", "ai")
+            "source": res.get("source", "ai"),
+            "last_decision": action,
         }
 
     # ------------------------------------------------------------ pianificazione DCA

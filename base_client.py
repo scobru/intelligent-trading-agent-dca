@@ -137,9 +137,12 @@ class BaseClient:
         return self._symbol_cache[key]
 
     def balance_of(self, token_address: str, address: str = None) -> int:
-        addr = Web3.to_checksum_address(address or self.address)
+        addr = address or self.address
+        if not addr:
+            return 0
         try:
-            return int(self.erc20(token_address).functions.balanceOf(addr).call())
+            checksum_addr = Web3.to_checksum_address(addr)
+            return int(self.erc20(token_address).functions.balanceOf(checksum_addr).call())
         except Exception as exc:
             logger.warning(f"Errore lettura balanceOf per {token_address} (wallet: {addr}): {exc}")
             return 0
@@ -153,11 +156,14 @@ class BaseClient:
             return 0.0
 
     def allowance(self, token_address: str, spender: str, address: str = None) -> int:
-        addr = Web3.to_checksum_address(address or self.address)
+        addr = address or self.address
+        if not addr:
+            return 0
         try:
+            checksum_addr = Web3.to_checksum_address(addr)
             return int(
                 self.erc20(token_address)
-                .functions.allowance(addr, Web3.to_checksum_address(spender))
+                .functions.allowance(checksum_addr, Web3.to_checksum_address(spender))
                 .call()
             )
         except Exception as exc:

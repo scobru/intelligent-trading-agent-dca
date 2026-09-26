@@ -122,13 +122,16 @@ HTML = r"""<!DOCTYPE html>
     </table></div>
   </section>
   <section class="card">
-    <div class="card-head"><h2>🧠 Ultima decisione AI</h2></div>
+    <div class="card-head">
+      <h2>🧠 Ultima decisione AI</h2>
+      <small id="ai-time" style="color:var(--text-muted); font-size:0.75rem; margin-top:2px;"></small>
+    </div>
     <div class="decision-box">
       <div class="title" id="ai-action">In attesa del primo ciclo...</div>
       <div class="desc" id="ai-reason">L'agente valuterà il portafoglio al prossimo intervallo o con "Esegui ciclo ora".</div>
     </div>
     <div class="kv">
-      <div><b>Modello:</b> OpenRouter</div>
+      <div><b>Modello:</b> <span id="ai-model">OpenRouter</span></div>
       <div><b>Strategia:</b> DCA modulato dal sentiment + ribilanciamento automatico</div>
     </div>
   </section>
@@ -208,24 +211,109 @@ function renderStatus(s) {
   }).join('') || empty(8, 'Nessun asset trovato.');
 }
 
+function formatOpAction(op) {
+  if (!op) return 'DECISIONE AI';
+  const name = String(op.operation || '').toLowerCase();
+  if (name === 'dca') {
+    const amt = op.amount_usd ? ` (${usd(op.amount_usd)})` : '';
+    return 'DCA • ACCUMULO' + amt;
+  }
+  if (name === 'rebalance') {
+    let pair = '';
+    try {
+      const d = typeof op.details_json === 'string' ? JSON.parse(op.details_json) : (op.details_json || op);
+      if (d && d.from_asset && d.to_asset) pair = ` (${d.from_asset} ➔ ${d.to_asset})`;
+    } catch(e) {}
+    return 'RIBILANCIAMENTO PORTAFOGLIO' + pair;
+  }
+  if (name === 'hold') {
+    return 'HOLD • NESSUNA AZIONE';
+  }
+  if (name === 'recalibrate_weights' || name === 'ai_recalibrate') {
+    return '🧠 RICALIBRAZIONE PESI TARGET';
+  }
+  return (op.operation || 'DECISIONE AI').toUpperCase();
+}
+
+function renderDecision(s, ops) {
+  s = s || {};
+  ops = ops || [];
+  const p = s.portfolio || {};
+
+  if ($('ai-model') && s.model) {
+    $('ai-model').textContent = s.model;
+  }
+
+  let best = null;
+
+  // 1. Operazione piu' recente da storico operazioni
+  if (ops.length > 0 && ops[0].created_at) {
+    const op = ops[0];
+    best = {
+      action: formatOpAction(op),
+      reason: op.reason || 'Nessuna motivazione registrata.',
+      time: op.created_at,
+    };
+  }
+
+  // 2. Ultima decisione esplicita registrata dal bot nel portfolio state
+  const dec = s.last_decision;
+  if (dec && dec.created_at && (!best || dec.created_at >= best.time)) {
+    best = {
+      action: formatOpAction(dec),
+      reason: dec.reason || 'Nessuna motivazione registrata.',
+      time: dec.created_at,
+    };
+  }
+
+  // 3. Ricalibrazione tattica pesi dell'AI Allocator
+  const recalTime = p.last_weight_recalibrate_time || (s.hours_since_last_recalibrate ? (Date.now()/1000 - s.hours_since_last_recalibrate * 3600) : 0);
+  const recalRationale = s.weights_rationale || p.weights_rationale;
+  if (recalRationale && recalRationale !== 'Pesi di default' && recalRationale !== 'Pesi bilanciati di default') {
+    if (!best || (recalTime && recalTime >= best.time)) {
+      best = {
+        action: '🧠 ALLOCAZIONE TATTICA AI',
+        reason: recalRationale,
+        time: recalTime,
+      };
+    }
+  }
+
+  if (best) {
+    $('ai-action').textContent = best.action;
+    $('ai-reason').textContent = best.reason;
+    if ($('ai-time') && best.time) {
+      $('ai-time').textContent = '• ' + time(best.time);
+    }
+  }
+}
+
 function renderOps(ops) {
   $('ops').innerHTML = ops.map(o => {
     let detail = '--';
     try {
-      const d = JSON.parse(o.details_json || '{}');
+      const d = typeof o.details_json === 'string' ? JSON.parse(o.details_json || '{}') : (o.details_json || {});
       if (d.operation === 'dca') {
         detail = (d.purchases || []).map(p => `${p.asset}: $${p.amount_usd}`).join(', ');
       } else if (d.operation === 'rebalance') {
         detail = `${d.from_asset} ➔ ${d.to_asset}`;
+      } else if (d.operation === 'recalibrate_weights') {
+        const tw = d.target_weights || {};
+        detail = Object.entries(tw).map(([k, v]) => `${k} ${(Number(v)*100).toFixed(0)}%`).join(' ');
       }
     } catch(e) {}
 
+    const isGood = o.operation === 'dca' || o.operation === 'rebalance' || o.operation === 'recalibrate_weights';
+    const isBad = o.status === 'error' || o.status === 'rejected' || o.status === 'failed';
+    const stBadge = isBad ? 'b-bad' : (o.status === 'hold' ? 'b-no' : 'b-ok');
+    const opBadge = isGood ? 'b-ok' : (o.operation === 'hold' ? 'b-no' : 'b-bad');
+
     return `<tr>
       <td>${time(o.created_at)}</td>
-      <td><span class="badge ${o.operation === 'dca' ? 'b-ok' : 'b-no'}">${(o.operation || '').toUpperCase()}</span></td>
+      <td><span class="badge ${opBadge}">${(o.operation || '').toUpperCase()}</span></td>
       <td>${esc(detail)}</td>
-      <td class="num">${usd(o.amount_usd)}</td>
-      <td><span class="badge ${o.status === 'success' ? 'b-ok' : 'b-no'}">${esc(o.status)}</span></td>
+      <td class="num">${o.amount_usd ? usd(o.amount_usd) : '--'}</td>
+      <td><span class="badge ${stBadge}">${esc(o.status)}</span></td>
       <td class="reason">${esc(o.reason)}</td>
     </tr>`;
   }).join('') || empty(6, 'Nessuna operazione registrata.');
@@ -252,6 +340,7 @@ async function refresh() {
     ]);
     renderStatus(sRes);
     renderOps(opRes);
+    renderDecision(sRes, opRes);
     renderChart(snapRes);
     $('updated').textContent = 'Aggiornato: ' + new Date().toLocaleTimeString();
   } catch(e) {
@@ -262,10 +351,15 @@ async function refresh() {
 $('run').addEventListener('click', async () => {
   const token = prompt('Inserisci il DASHBOARD_RUN_TOKEN (se configurato):') || '';
   try {
-    const res = await fetch('/api/run', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'X-Run-Token': token }
+    });
     if (res.ok) {
       alert('Ciclo avviato in background.');
       setTimeout(refresh, 2500);
+      setTimeout(refresh, 6000);
+      setTimeout(refresh, 10000);
     } else {
       alert('Avvio rifiutato (token non valido).');
     }
@@ -275,11 +369,15 @@ $('run').addEventListener('click', async () => {
 $('recal-btn').addEventListener('click', async () => {
   const token = prompt('Inserisci il DASHBOARD_RUN_TOKEN (se configurato):') || '';
   try {
-    const res = await fetch('/api/ai_recalibrate', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+    const res = await fetch('/api/ai_recalibrate', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'X-Run-Token': token }
+    });
     const data = await res.json();
     if (res.ok && data.status === 'success') {
       alert('🎯 Pesi aggiornati con successo dall\'AI!\n\nRationale: ' + (data.rationale || ''));
       refresh();
+      setTimeout(refresh, 2000);
     } else {
       alert('Ricalibrazione: ' + (data.message || data.error || 'Errore o autorizzazione negata'));
     }
@@ -431,7 +529,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             def _target():
                 with _run_lock:
                     try:
-                        subprocess.run([sys.executable, "main.py"], check=False)
+                        project_dir = os.path.dirname(os.path.abspath(__file__))
+                        main_py = os.path.join(project_dir, "main.py")
+                        res = subprocess.run(
+                            [sys.executable, main_py],
+                            cwd=project_dir,
+                            env=os.environ.copy(),
+                            capture_output=True,
+                            text=True,
+                            check=False
+                        )
+                        if res.returncode == 0:
+                            logger.info("Ciclo main.py terminato con successo:\n%s", res.stdout[-400:] if res.stdout else "")
+                        else:
+                            logger.error("Ciclo main.py fallito (code %d):\nSTDOUT: %s\nSTDERR: %s",
+                                         res.returncode, res.stdout, res.stderr)
                     except Exception as e:
                         logger.error("Errore esecuzione main.py: %s", e)
 

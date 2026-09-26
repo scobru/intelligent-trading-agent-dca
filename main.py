@@ -167,11 +167,20 @@ def run_cycle():
     result = manager.execute_action(decision, status)
     print(f"⚡ Esito esecuzione: {result.get('status', 'noop').upper()}")
 
-    # 6. Registrazione DB
+    # 6. Registrazione DB e stato
     try:
         db_utils.log_operation(decision, result)
     except Exception as exc:
         print(f"[db_utils] operazione non salvata: {exc}")
+
+    try:
+        import time
+        dec_record = dict(decision)
+        dec_record["status"] = result.get("status", "completed")
+        dec_record["created_at"] = time.time()
+        manager.tracker.record_decision(dec_record)
+    except Exception as exc:
+        logger.warning("Impossibile salvare last_decision in tracker: %s", exc)
 
     print("🏁 Ciclo completato con successo.\n")
     return {"status": status, "decision": decision, "result": result}

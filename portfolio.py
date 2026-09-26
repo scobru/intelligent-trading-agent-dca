@@ -65,6 +65,13 @@ class PortfolioTracker:
         self.state["rebalance_count"] = int(self.state.get("rebalance_count", 0)) + 1
         self.save()
 
+    def record_decision(self, decision: Dict[str, Any]):
+        dec = dict(decision)
+        if "created_at" not in dec:
+            dec["created_at"] = time.time()
+        self.state["last_decision"] = dec
+        self.save()
+
     def get_target_weights(self) -> Dict[str, float]:
         """Restituisce i pesi target correnti (personalizzati/AI o di default)."""
         stored = self.state.get("target_weights")
@@ -208,4 +215,5 @@ class PortfolioTracker:
             "dca_count": self.state.get("dca_count", 0),
             "rebalance_count": self.state.get("rebalance_count", 0),
             "total_dca_spent_usd": round(self.state.get("total_dca_spent_usd", 0.0), 2),
+            "last_decision": self.state.get("last_decision"),
         }
