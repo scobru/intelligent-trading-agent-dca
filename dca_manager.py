@@ -46,16 +46,18 @@ class DcaManager:
             balances = self.paper.get_balances_with_eth()
             mode = "paper"
         else:
-            balances = {
-                "USDC": self.client.balance_of_float(config.USDC),
-                "WETH": self.client.balance_of_float(config.WETH),
-                "CBBTC": self.client.balance_of_float(config.CBBTC),
-                "ETH": self.client.eth_balance(),
-            }
-            # Se ci sono altri asset noti
+            balances = {}
             for sym, meta in config.KNOWN_ASSETS.items():
-                if sym not in balances:
+                try:
                     balances[sym] = self.client.balance_of_float(meta["address"])
+                except Exception as exc:
+                    logger.warning(f"Errore recupero saldo per {sym}: {exc}")
+                    balances[sym] = 0.0
+            try:
+                balances["ETH"] = self.client.eth_balance()
+            except Exception as exc:
+                logger.warning(f"Errore recupero saldo ETH: {exc}")
+                balances["ETH"] = 0.0
             mode = "dry_run" if config.DRY_RUN else "live"
 
         eval_data = self.tracker.evaluate(balances, prices)

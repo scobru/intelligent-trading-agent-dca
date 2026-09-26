@@ -316,6 +316,28 @@ class TestTacticalWeights(unittest.TestCase):
         self.assertAlmostEqual(sum(res["target_weights"].values()), 1.0, places=3)
 
 
+
+class TestBaseClientResilience(unittest.TestCase):
+    def test_balance_of_resilience(self):
+        from base_client import BaseClient
+        with patch.object(BaseClient, "__init__", return_value=None):
+            client = BaseClient()
+            client.address = "0x2F1698080aCF28C5B45Ff5dA6d935b23389d7bF4"
+            client._decimals_cache = {}
+            client._symbol_cache = {}
+            mock_erc = MagicMock()
+            mock_erc.functions.balanceOf.return_value.call.side_effect = Exception("BadFunctionCallOutput: 0 bytes")
+            mock_erc.functions.decimals.return_value.call.side_effect = Exception("RPC timeout")
+            client.erc20 = MagicMock(return_value=mock_erc)
+
+            bal = client.balance_of("0x940181a94A35A4569E4529A3CDfB74e38FD98631")
+            self.assertEqual(bal, 0)
+            bal_fl = client.balance_of_float("0x940181a94A35A4569E4529A3CDfB74e38FD98631")
+            self.assertEqual(bal_fl, 0.0)
+            dec = client.decimals("0x940181a94A35A4569E4529A3CDfB74e38FD98631")
+            self.assertEqual(dec, 18)
+
+
 if __name__ == "__main__":
     unittest.main()
 

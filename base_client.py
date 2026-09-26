@@ -120,7 +120,11 @@ class BaseClient:
     def decimals(self, token_address: str) -> int:
         key = token_address.lower()
         if key not in self._decimals_cache:
-            self._decimals_cache[key] = int(self.erc20(token_address).functions.decimals().call())
+            try:
+                self._decimals_cache[key] = int(self.erc20(token_address).functions.decimals().call())
+            except Exception as exc:
+                logger.warning(f"Errore lettura decimals per {token_address}, fallback a 18: {exc}")
+                self._decimals_cache[key] = 18
         return self._decimals_cache[key]
 
     def symbol(self, token_address: str) -> str:
@@ -134,19 +138,31 @@ class BaseClient:
 
     def balance_of(self, token_address: str, address: str = None) -> int:
         addr = Web3.to_checksum_address(address or self.address)
-        return int(self.erc20(token_address).functions.balanceOf(addr).call())
+        try:
+            return int(self.erc20(token_address).functions.balanceOf(addr).call())
+        except Exception as exc:
+            logger.warning(f"Errore lettura balanceOf per {token_address} (wallet: {addr}): {exc}")
+            return 0
 
     def balance_of_float(self, token_address: str, address: str = None) -> float:
-        raw = self.balance_of(token_address, address)
-        return raw / (10 ** self.decimals(token_address))
+        try:
+            raw = self.balance_of(token_address, address)
+            return raw / (10 ** self.decimals(token_address))
+        except Exception as exc:
+            logger.warning(f"Errore balance_of_float per {token_address}: {exc}")
+            return 0.0
 
     def allowance(self, token_address: str, spender: str, address: str = None) -> int:
         addr = Web3.to_checksum_address(address or self.address)
-        return int(
-            self.erc20(token_address)
-            .functions.allowance(addr, Web3.to_checksum_address(spender))
-            .call()
-        )
+        try:
+            return int(
+                self.erc20(token_address)
+                .functions.allowance(addr, Web3.to_checksum_address(spender))
+                .call()
+            )
+        except Exception as exc:
+            logger.warning(f"Errore lettura allowance per {token_address} -> {spender}: {exc}")
+            return 0
 
     # ------------------------------------------------------------ verifica indirizzi
     def verify_contracts(self, tokens: Dict[str, Dict[str, Any]] = None) -> List[str]:
