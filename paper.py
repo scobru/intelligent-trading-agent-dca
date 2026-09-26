@@ -61,16 +61,21 @@ class PaperBook:
         return self.state.setdefault("balances", {})
 
     def get_balances_with_eth(self) -> Dict[str, float]:
-        """Restituisce i saldi unificando WETH ed ETH nativo."""
+        """Restituisce i saldi unificando WETH ed ETH nativo e includendo tutti gli asset noti."""
         b = dict(self.balances)
-        # Inclusione di ETH nativo (spendibile oltre riserva)
-        weth_total = float(b.get("WETH", 0.0))
-        return {
+        res = {
             "USDC": float(b.get("USDC", 0.0)),
-            "WETH": weth_total,
+            "WETH": float(b.get("WETH", 0.0)),
             "CBBTC": float(b.get("CBBTC", 0.0)),
             "ETH": float(b.get("ETH", 0.0)),
         }
+        for sym in getattr(config, "KNOWN_ASSETS", {}):
+            if sym not in res:
+                res[sym] = float(b.get(sym, 0.0))
+        for sym, qty in b.items():
+            if sym not in res:
+                res[sym] = float(qty)
+        return res
 
     def execute_swap(self, token_in: str, token_out: str, amount_in: float,
                      prices: Dict[str, float], slippage_bps: int = None,

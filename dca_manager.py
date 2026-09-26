@@ -82,6 +82,7 @@ class DcaManager:
             "sentiment": fng,
             "dca_due": dca_due,
             "rebalance_due": reb_due,
+            "gas_eth": eval_data.get("gas_eth", {}),
             "hours_since_last_dca": round(time_since_dca / 3600.0, 1) if eval_data.get("last_dca_time") else None,
             "hours_since_last_rebalance": round(time_since_reb / 3600.0, 1) if eval_data.get("last_rebalance_time") else None,
         }

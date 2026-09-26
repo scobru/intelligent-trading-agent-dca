@@ -47,7 +47,7 @@ class TestConfigAndWeights(unittest.TestCase):
     def test_parse_target_weights_invalid(self):
         res = config._parse_target_weights("INVALID_FORMAT")
         self.assertIn("WETH", res)
-        self.assertEqual(res["WETH"], 0.50)
+        self.assertEqual(res["WETH"], 0.25)
 
 
 class TestSentiment(unittest.TestCase):
@@ -77,8 +77,11 @@ class TestPortfolioTracker(unittest.TestCase):
         self.client_mock = MagicMock()
         self.uniswap_mock = MagicMock()
         self.tracker = PortfolioTracker(self.client_mock, self.uniswap_mock, state_path=self.state_file)
+        self.p_weights = patch.dict("config.TARGET_WEIGHTS", {"WETH": 0.50, "CBBTC": 0.30, "USDC": 0.20}, clear=True)
+        self.p_weights.start()
 
     def tearDown(self):
+        self.p_weights.stop()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_evaluate_balanced(self):
@@ -107,7 +110,10 @@ class TestPaperBook(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.state_file = os.path.join(self.temp_dir, "test_paper.json")
         self.paper = PaperBook(path=self.state_file, start_usdc=1000.0, start_eth=0.1)
-        self.prices = {"USDC": 1.0, "WETH": 2000.0, "CBBTC": 60000.0, "ETH": 2000.0}
+        self.prices = {
+            "USDC": 1.0, "WETH": 2000.0, "CBBTC": 60000.0, "ETH": 2000.0,
+            "LINK": 15.0, "UNI": 10.0, "AERO": 1.0,
+        }
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -149,6 +155,8 @@ class TestDcaManager(unittest.TestCase):
 
         self.client_mock = MagicMock()
         self.client_mock.address = "0x1111111111111111111111111111111111111111"
+        self.client_mock.balance_of_float.return_value = 0.0
+        self.client_mock.eth_balance.return_value = 0.0
 
         self.p_port = patch("config.PORTFOLIO_PATH", self.state_file)
         self.p_paper = patch("config.PAPER_STATE_PATH", self.paper_file)
@@ -158,7 +166,10 @@ class TestDcaManager(unittest.TestCase):
         self.p_pt.start()
 
         self.manager = DcaManager(self.client_mock)
-        self.manager._prices = {"USDC": 1.0, "WETH": 2500.0, "CBBTC": 60000.0, "ETH": 2500.0}
+        self.manager._prices = {
+            "USDC": 1.0, "WETH": 2500.0, "CBBTC": 60000.0, "ETH": 2500.0,
+            "LINK": 15.0, "UNI": 10.0, "AERO": 1.0,
+        }
 
     def tearDown(self):
         self.p_port.stop()
@@ -250,7 +261,13 @@ class TestDatabaseUtils(unittest.TestCase):
         ops = db_utils.get_recent_operations(limit=5)
     def test_release_funds_paper(self):
         client = MagicMock()
+        client.balance_of_float.return_value = 0.0
+        client.eth_balance.return_value = 0.0
         manager = DcaManager(client=client)
+        manager._prices = {
+            "USDC": 1.0, "WETH": 2500.0, "CBBTC": 60000.0, "ETH": 2500.0,
+            "LINK": 15.0, "UNI": 10.0, "AERO": 1.0,
+        }
         # In paper mode with initial balance
         res = manager.release_funds(target_usdc=50.0)
         self.assertIn(res.get("status"), ["success", "no_action"])

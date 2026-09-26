@@ -76,7 +76,7 @@ HTML = r"""<!DOCTYPE html>
   <div class="brand">
     <img src="/static/icon.svg" alt="">
     <div>
-      <h1>DCA &amp; Rebalancer <span class="badge b-no" id="mode">…</span></h1>
+      <h1>DCA &amp; Rebalancer <span class="badge b-no" id="mode">…</span> <span class="badge" id="gas-pill" style="font-size:0.8rem; vertical-align:middle; background:rgba(255,255,255,0.08);">⛽ Gas: --</span></h1>
       <p class="tagline">Accumulo dinamico &amp; Ribilanciamento pesi su Base • Fear &amp; Greed • Uniswap V3</p>
     </div>
   </div>
@@ -179,6 +179,11 @@ function renderStatus(s) {
   $('reb-status').textContent = p.needs_rebalance ? '⚠️ Ribilanciamento dovuto' : '✅ In equilibrio';
   $('reb-status').style.color = p.needs_rebalance ? '#ef4444' : '#10b981';
 
+  // Gas reserve pill
+  if (s.gas_eth && s.gas_eth.amount != null) {
+    $('gas-pill').textContent = `⛽ Gas: ${Number(s.gas_eth.amount).toFixed(4)} ETH (${usd(s.gas_eth.value_usd)})`;
+  }
+
   // Assets table
   const assets = Object.values(p.assets || {});
   $('assets').innerHTML = assets.map(a => {
@@ -187,7 +192,7 @@ function renderStatus(s) {
     const tagCls = isOver ? 'tag-over' : isUnder ? 'tag-under' : 'tag-ok';
     const tagTxt = isOver ? 'Sovrappeso' : isUnder ? 'Sottopeso' : 'In target';
     return `<tr>
-      <td><b>${esc(a.symbol)}</b></td>
+      <td><b>${esc(a.symbol)}</b>${a.category ? `<small style="color:var(--text-muted); display:block; font-size:0.75rem;">${esc(a.category)}</small>` : ''}</td>
       <td class="num">${Number(a.amount).toFixed(4)}</td>
       <td class="num">${usd(a.price_usd)}</td>
       <td class="num"><b>${usd(a.value_usd)}</b></td>

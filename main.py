@@ -86,6 +86,9 @@ def run_cycle():
     fng = status["sentiment"]
 
     print(f"   Valore totale: ${total_usd:.2f} | Fear & Greed: {fng.get('value')}/100 ({fng.get('classification')})")
+    gas_eth = status.get("gas_eth", {})
+    if gas_eth.get("amount") is not None:
+        print(f"   ⛽ Riserva Gas: {gas_eth['amount']:.4f} ETH (${gas_eth['value_usd']:.2f})")
     for sym, a in status["portfolio"]["assets"].items():
         print(f"   - {sym:5s}: ${a['value_usd']:8.2f} ({a['current_weight']*100:5.1f}% vs target {a['target_weight']*100:5.1f}%, drift {a['drift_pct']:+5.1f}%)")
 

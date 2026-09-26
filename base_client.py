@@ -88,6 +88,11 @@ class BaseClient:
 
         self._decimals_cache: Dict[str, int] = {}
         self._symbol_cache: Dict[str, str] = {}
+        for sym, meta in getattr(config, "KNOWN_ASSETS", {}).items():
+            if "address" in meta and "decimals" in meta:
+                addr_lower = meta["address"].lower()
+                self._decimals_cache[addr_lower] = int(meta["decimals"])
+                self._symbol_cache[addr_lower] = sym
 
     # ------------------------------------------------------------ stato rete
     def is_connected(self) -> bool:

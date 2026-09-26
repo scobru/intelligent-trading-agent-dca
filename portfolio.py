@@ -73,6 +73,7 @@ class PortfolioTracker:
             weth_price = self.uniswap.price_in_quote(config.WETH, config.USDC, probe_units=0.01)
             if weth_price:
                 prices["WETH"] = weth_price
+                prices["ETH"] = weth_price
         except Exception as exc:
             logger.warning("Prezzo WETH non disponibile: %s", exc)
 
@@ -80,7 +81,8 @@ class PortfolioTracker:
             if sym in prices:
                 continue
             try:
-                price = self.uniswap.price_in_quote(meta["address"], config.USDC, probe_units=0.01)
+                probe = 0.0001 if sym in ("CBBTC", "BTC") else (5.0 if sym == "AERO" else 0.01)
+                price = self.uniswap.price_in_quote(meta["address"], config.USDC, probe_units=probe)
                 if price:
                     prices[sym] = price
             except Exception as exc:
@@ -97,12 +99,41 @@ class PortfolioTracker:
         assets_data = {}
         total_value_usd = 0.0
 
+        try:
+            gas_eth_qty = float(balances.get("ETH", 0.0))
+        except (TypeError, ValueError):
+            gas_eth_qty = 0.0
+        try:
+            eth_price = float(prices.get("ETH", prices.get("WETH", 0.0)))
+        except (TypeError, ValueError):
+            eth_price = 0.0
+        gas_eth_val = gas_eth_qty * eth_price
+
         target_weights = dict(config.TARGET_WEIGHTS)
-        all_symbols = set(target_weights.keys()) | set(balances.keys())
+
+        # Includi tutti gli asset target e gli asset detenuti con saldo significativo (> $0.10)
+        # Esclude ETH nativo se non ha un peso target specifico (riservato al gas)
+        all_symbols = set(target_weights.keys())
+        for sym, qty in balances.items():
+            if sym == "ETH" and target_weights.get("ETH", 0.0) <= 0:
+                continue
+            try:
+                qty_f = float(qty)
+                p_f = float(prices.get(sym, 1.0 if sym == "USDC" else 0.0))
+                if (qty_f * p_f) >= 0.10:
+                    all_symbols.add(sym)
+            except (TypeError, ValueError):
+                continue
 
         for sym in all_symbols:
-            qty = float(balances.get(sym, 0.0))
-            price = float(prices.get(sym, 1.0 if sym == "USDC" else 0.0))
+            try:
+                qty = float(balances.get(sym, 0.0))
+            except (TypeError, ValueError):
+                qty = 0.0
+            try:
+                price = float(prices.get(sym, 1.0 if sym == "USDC" else 0.0))
+            except (TypeError, ValueError):
+                price = 0.0
             val_usd = qty * price
             total_value_usd += val_usd
             assets_data[sym] = {
@@ -111,6 +142,7 @@ class PortfolioTracker:
                 "price_usd": round(price, 4),
                 "value_usd": round(val_usd, 4),
                 "target_weight": target_weights.get(sym, 0.0),
+                "category": config.KNOWN_ASSETS.get(sym, {}).get("category", "Asset"),
             }
 
         # Calcolo quote e drift
@@ -140,6 +172,11 @@ class PortfolioTracker:
         return {
             "total_value_usd": round(total_value_usd, 4),
             "assets": {a["symbol"]: a for a in sorted_assets},
+            "gas_eth": {
+                "amount": round(gas_eth_qty, 6),
+                "price_usd": round(eth_price, 2),
+                "value_usd": round(gas_eth_val, 2),
+            },
             "needs_rebalance": needs_rebalance,
             "overweight_symbols": overweight,
             "underweight_symbols": underweight,

@@ -228,3 +228,4 @@ portfolio_state.json
 # Pix Agent
 .pi/
 .pi-lens/
+graphify-out/

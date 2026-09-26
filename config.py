@@ -45,6 +45,9 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
 WETH = "0x4200000000000000000000000000000000000006"
 USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 CBBTC = "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf"
+LINK = "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196"
+UNI = "0xc3De830EA07524a0761646a6a4e4be0e114a3C83"
+AERO = "0x940181a94A35A4569E4529A3CDfB74e48FD98631"
 WSTETH = "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452"
 CBETH = "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22"
 
@@ -55,42 +58,54 @@ UNISWAP_V3_SWAP_ROUTER_02 = "0x2626664c2603336E57B271c5C0b26F421741e481"
 FEE_TIERS = (100, 500, 3000, 10000)
 
 KNOWN_ASSETS = {
-    "USDC": {"address": USDC, "decimals": 6, "stable": True},
-    "WETH": {"address": WETH, "decimals": 18, "stable": False},
-    "CBBTC": {"address": CBBTC, "decimals": 8, "stable": False},
-    "wstETH": {"address": WSTETH, "decimals": 18, "stable": False},
-    "cbETH": {"address": CBETH, "decimals": 18, "stable": False},
+    "USDC": {"address": USDC, "decimals": 6, "stable": True, "category": "Stablecoin"},
+    "CBBTC": {"address": CBBTC, "decimals": 8, "stable": False, "category": "Store of Value"},
+    "WETH": {"address": WETH, "decimals": 18, "stable": False, "category": "L1/L2 Infrastructure"},
+    "LINK": {"address": LINK, "decimals": 18, "stable": False, "category": "Oracles / RWA"},
+    "UNI": {"address": UNI, "decimals": 18, "stable": False, "category": "DeFi / DEX"},
+    "AERO": {"address": AERO, "decimals": 18, "stable": False, "category": "Base DEX"},
 }
 
 BASE_CURRENCY = "USDC"
 
 # ---------------------------------------------------------------- pesi obiettivo portafoglio
-# Formato env: TARGET_WEIGHTS="WETH:0.50,CBBTC:0.30,USDC:0.20"
+# Formato env: TARGET_WEIGHTS="WETH:0.25,CBBTC:0.25,LINK:0.15,UNI:0.10,AERO:0.10,USDC:0.15"
+DEFAULT_TARGET_WEIGHTS = {
+    "WETH": 0.25,
+    "CBBTC": 0.25,
+    "LINK": 0.15,
+    "UNI": 0.10,
+    "AERO": 0.10,
+    "USDC": 0.15,
+}
+
 def _parse_target_weights(raw: str) -> Dict[str, float]:
     weights = {}
     total = 0.0
+    aliases = {
+        "ETH": "WETH",
+        "BTC": "CBBTC",
+    }
     for part in raw.split(","):
         if ":" in part:
             sym, w = part.split(":", 1)
             sym = sym.strip().upper()
-            if sym == "ETH":
-                sym = "WETH"
-            if sym == "BTC":
-                sym = "CBBTC"
+            sym = aliases.get(sym, sym)
             try:
                 val = float(w.strip())
-                weights[sym] = val
-                total += val
+                if val > 0:
+                    weights[sym] = val
+                    total += val
             except ValueError:
                 continue
     if not weights or total <= 0:
-        return {"WETH": 0.50, "CBBTC": 0.30, "USDC": 0.20}
+        return dict(DEFAULT_TARGET_WEIGHTS)
     # Normalizza a somma 1.0
     return {k: round(v / total, 4) for k, v in weights.items()}
 
 
 TARGET_WEIGHTS = _parse_target_weights(
-    os.getenv("TARGET_WEIGHTS", "WETH:0.50,CBBTC:0.30,USDC:0.20")
+    os.getenv("TARGET_WEIGHTS", "WETH:0.25,CBBTC:0.25,LINK:0.15,UNI:0.10,AERO:0.10,USDC:0.15")
 )
 
 # ---------------------------------------------------------------- DCA dinamico (Fear & Greed)
