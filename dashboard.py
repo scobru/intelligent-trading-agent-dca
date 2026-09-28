@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -34,6 +35,67 @@ logger = logging.getLogger("dashboard")
 PORT = int(os.getenv("DASHBOARD_PORT", os.getenv("PORT", "3000")))
 RUN_TOKEN = os.getenv("DASHBOARD_RUN_TOKEN", "")
 _run_lock = threading.Lock()
+
+
+class StatusCache:
+    """
+    Cache di /api/status condivisa tra tutte le richieste.
+
+    Ogni refresh legge saldi (e periodicamente prezzi) dall'RPC: senza cache
+    ogni tab aperta ogni 15 s moltiplica le chiamate e fa scattare i 429.
+    Il lock fa si' che richieste concorrenti aspettino un solo refresh.
+    Se il refresh fallisce si continua a servire l'ultimo stato buono.
+    """
+
+    def __init__(self, ttl: float, prices_ttl: float):
+        self.ttl = ttl
+        self.prices_ttl = prices_ttl
+        self._lock = threading.Lock()
+        self._status: Optional[Dict[str, Any]] = None
+        self._fetched_at = 0.0
+        self._prices_at = 0.0
+        self._last_error: Optional[str] = None
+        self._error_at = 0.0
+
+    def get(self, manager: DcaManager) -> Dict[str, Any]:
+        with self._lock:
+            now = time.time()
+            # Dopo un errore non ritentare prima del TTL: evita di martellare un RPC in 429
+            fresh = now - max(self._fetched_at, self._error_at) < self.ttl
+            if not fresh:
+                if now - self._prices_at >= self.prices_ttl:
+                    manager.invalidate_prices()
+                    self._prices_at = now
+                try:
+                    self._status = manager.get_status()
+                    self._fetched_at = now
+                    self._last_error = None
+                except Exception as exc:
+                    logger.warning("Refresh stato dashboard fallito: %s", exc)
+                    self._last_error = str(exc)
+                    self._error_at = now
+
+            if self._status is None:
+                raise RuntimeError(self._last_error or "Stato non disponibile")
+            status = dict(self._status)
+            status["cached_at"] = self._fetched_at
+            status["stale"] = self._last_error is not None
+            if self._last_error:
+                status["stale_reason"] = self._last_error
+            return status
+
+
+_status_cache = StatusCache(config.DASHBOARD_STATUS_TTL, config.DASHBOARD_PRICES_TTL)
+
+
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        # Il browser ha chiuso la connessione prima della risposta (tab chiusa,
+        # refresh, timeout del proxy): niente traceback nei log
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_ROUTES = {
@@ -385,7 +447,9 @@ $('recal-btn').addEventListener('click', async () => {
 });
 
 refresh();
-setInterval(refresh, 15000);
+// Niente polling dalle tab in background: ogni poll costa chiamate RPC
+setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 </script>
 </body>
 </html>
@@ -421,7 +485,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             try:
-                status = self.manager.get_status()
+                status = _status_cache.get(self.manager)
                 status["is_paused"] = db_utils.is_bot_paused()
                 status["pause_info"] = db_utils.get_pause_info()
                 self.wfile.write(json.dumps(status, default=str).encode("utf-8"))
@@ -568,7 +632,7 @@ def run_dashboard():
     DashboardHandler.client = client
     DashboardHandler.manager = DcaManager(client)
 
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), DashboardHandler)
+    server = QuietThreadingHTTPServer(("0.0.0.0", PORT), DashboardHandler)
     print(f"🚀 Dashboard DCA attiva su http://localhost:{PORT}")
     try:
         server.serve_forever()
