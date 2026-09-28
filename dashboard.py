@@ -9,7 +9,6 @@ Standard library HTTP server (senza Flask/FastAPI), identica struttura ai bot fr
   - Pulsante 'Esegui ciclo ora'
 """
 
-import hmac
 import json
 import logging
 import os
@@ -25,6 +24,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import config
+import dashboard_auth
 import db_utils
 from base_client import BaseClient
 from dca_manager import DcaManager
@@ -455,16 +455,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def _is_auth_valid(self) -> bool:
-        if not RUN_TOKEN:
-            return False
-        token = self.headers.get("X-Run-Token", "") or self.headers.get("X-Admin-Token", "")
-        if not token and "Authorization" in self.headers:
-            auth = self.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                token = auth[7:].strip()
-            else:
-                token = auth.strip()
-        return bool(token and hmac.compare_digest(token, RUN_TOKEN))
+        return dashboard_auth.is_run_token_valid(self.headers, RUN_TOKEN)
 
     def _send_json(self, status: int, data: Any):
         body = json.dumps(data, default=str).encode("utf-8")
