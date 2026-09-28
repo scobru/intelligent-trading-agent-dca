@@ -9,6 +9,8 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+import requests
+
 import config
 import sentiment
 from base_client import BaseChainError, BaseClient
@@ -33,6 +35,10 @@ class DcaManager:
             self._prices = self.tracker.get_prices()
         return self._prices
 
+    def invalidate_prices(self):
+        """Forza la rilettura dei prezzi alla prossima chiamata (processi long-running)."""
+        self._prices = None
+
     # ------------------------------------------------------------ auto-refuel
     def ensure_usdc_balance(self) -> Optional[Dict[str, Any]]:
         if self.paper or not self.client:
@@ -46,21 +52,40 @@ class DcaManager:
             balances = self.paper.get_balances_with_eth()
             mode = "paper"
         else:
-            balances = {}
-            for sym, meta in config.KNOWN_ASSETS.items():
-                try:
-                    balances[sym] = self.client.balance_of_float(meta["address"])
-                except Exception as exc:
-                    logger.warning(f"Errore recupero saldo per {sym}: {exc}")
-                    balances[sym] = 0.0
-            try:
-                balances["ETH"] = self.client.eth_balance()
-            except Exception as exc:
-                logger.warning(f"Errore recupero saldo ETH: {exc}")
-                balances["ETH"] = 0.0
+            balances = self._read_chain_balances()
             mode = "dry_run" if config.DRY_RUN else "live"
 
         eval_data = self.tracker.evaluate(balances, prices)
+        return self._build_status(balances, prices, eval_data, mode)
+
+    def _read_chain_balances(self) -> Dict[str, float]:
+        tokens = {sym: meta["address"] for sym, meta in config.KNOWN_ASSETS.items()}
+        try:
+            # Una sola eth_call per tutti i saldi (Multicall3)
+            return self.client.balances_batch(tokens)
+        except requests.RequestException as exc:
+            # Rate limit / errore di rete anche dopo i retry: non restituire saldi a
+            # zero, finirebbero negli snapshot come un crollo del portafoglio
+            raise BaseChainError(f"Saldi non leggibili dall'RPC: {exc}") from exc
+        except Exception as exc:
+            logger.warning("Multicall saldi fallita (%s): lettura token per token", exc)
+
+        balances = {}
+        for sym, meta in config.KNOWN_ASSETS.items():
+            try:
+                balances[sym] = self.client.balance_of_float(meta["address"])
+            except Exception as exc:
+                logger.warning(f"Errore recupero saldo per {sym}: {exc}")
+                balances[sym] = 0.0
+        try:
+            balances["ETH"] = self.client.eth_balance()
+        except Exception as exc:
+            logger.warning(f"Errore recupero saldo ETH: {exc}")
+            balances["ETH"] = 0.0
+        return balances
+
+    def _build_status(self, balances: Dict[str, float], prices: Dict[str, float],
+                      eval_data: Dict[str, Any], mode: str) -> Dict[str, Any]:
         fng = sentiment.get_fear_and_greed()
 
         # DCA eligibility check

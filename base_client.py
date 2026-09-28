@@ -9,9 +9,11 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+import requests
 from eth_account import Account
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
+from web3.providers.rpc.utils import ExceptionRetryConfiguration
 
 import config
 
@@ -55,6 +57,26 @@ WETH_ABI = [
     },
 ]
 
+MULTICALL3_ABI = [
+    {
+        "inputs": [{"components": [
+            {"name": "target", "type": "address"},
+            {"name": "allowFailure", "type": "bool"},
+            {"name": "callData", "type": "bytes"},
+        ], "name": "calls", "type": "tuple[]"}],
+        "name": "aggregate3",
+        "outputs": [{"components": [
+            {"name": "success", "type": "bool"},
+            {"name": "returnData", "type": "bytes"},
+        ], "name": "returnData", "type": "tuple[]"}],
+        "stateMutability": "payable",
+        "type": "function",
+    },
+    {"inputs": [{"name": "addr", "type": "address"}], "name": "getEthBalance",
+     "outputs": [{"name": "balance", "type": "uint256"}],
+     "stateMutability": "view", "type": "function"},
+]
+
 MAX_UINT256 = 2 ** 256 - 1
 
 
@@ -65,7 +87,18 @@ class BaseChainError(RuntimeError):
 class BaseClient:
     def __init__(self, rpc_url: str = None, private_key: str = None, address: str = None):
         self.rpc_url = rpc_url or config.BASE_RPC_URL
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={"timeout": config.HTTP_TIMEOUT}))
+        # Retry piu' lunghi del default web3 (5 x 0.125s): con provider come
+        # Alchemy un 429 dura piu' di qualche centinaio di millisecondi
+        retry_cfg = ExceptionRetryConfiguration(
+            errors=(requests.ConnectionError, requests.HTTPError, requests.Timeout),
+            retries=config.RPC_RETRIES,
+            backoff_factor=config.RPC_BACKOFF_FACTOR,
+        )
+        self.w3 = Web3(Web3.HTTPProvider(
+            self.rpc_url,
+            request_kwargs={"timeout": config.HTTP_TIMEOUT},
+            exception_retry_configuration=retry_cfg,
+        ))
         # Base e' una L2 OP-stack: gli header hanno extraData fuori standard
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
@@ -146,6 +179,40 @@ class BaseClient:
         except Exception as exc:
             logger.warning(f"Errore lettura balanceOf per {token_address} (wallet: {addr}): {exc}")
             return 0
+
+    def balances_batch(self, tokens: Dict[str, str], address: str = None) -> Dict[str, float]:
+        """
+        Saldi di piu' token + ETH nativo in una sola eth_call via Multicall3,
+        invece di una richiesta RPC per token. Chiavi = simboli di `tokens`
+        piu' "ETH". Solleva eccezione se la chiamata fallisce: meglio nessun
+        dato che saldi a zero falsi.
+        """
+        addr = address or self.address
+        if not addr:
+            return {sym: 0.0 for sym in list(tokens) + ["ETH"]}
+        owner = Web3.to_checksum_address(addr)
+        multicall = self.w3.eth.contract(
+            address=Web3.to_checksum_address(config.MULTICALL3), abi=MULTICALL3_ABI
+        )
+
+        symbols = list(tokens)
+        calls = [
+            (Web3.to_checksum_address(tokens[sym]), True,
+             self.erc20(tokens[sym]).encode_abi("balanceOf", args=[owner]))
+            for sym in symbols
+        ]
+        calls.append((multicall.address, True, multicall.encode_abi("getEthBalance", args=[owner])))
+
+        results = multicall.functions.aggregate3(calls).call()
+
+        balances: Dict[str, float] = {}
+        for sym, (ok, data) in zip(symbols + ["ETH"], results):
+            if not ok or len(data) < 32:
+                raise BaseChainError(f"Multicall: lettura saldo {sym} fallita")
+            raw = int.from_bytes(data[:32], "big")
+            decimals = 18 if sym == "ETH" else self.decimals(tokens[sym])
+            balances[sym] = raw / (10 ** decimals)
+        return balances
 
     def balance_of_float(self, token_address: str, address: str = None) -> float:
         try:

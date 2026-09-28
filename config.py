@@ -153,6 +153,16 @@ TX_DEADLINE_SECONDS = _i("TX_DEADLINE_SECONDS", 300)
 TX_TIMEOUT_SECONDS = _i("TX_TIMEOUT_SECONDS", 180)
 HTTP_TIMEOUT = _i("HTTP_TIMEOUT", 30)
 
+# ---------------------------------------------------------------- limiti RPC
+# Retry con backoff esponenziale su 429 / errori di rete (4 tentativi: attese 0.5, 1, 2 s)
+RPC_RETRIES = _i("RPC_RETRIES", 4)
+RPC_BACKOFF_FACTOR = _f("RPC_BACKOFF_FACTOR", 0.5)
+# Multicall3 (stesso indirizzo su tutte le chain EVM, Base inclusa)
+MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
+# La dashboard ricalcola /api/status al massimo ogni N secondi (saldi) e i prezzi ogni M
+DASHBOARD_STATUS_TTL = _i("DASHBOARD_STATUS_TTL", 60)
+DASHBOARD_PRICES_TTL = _i("DASHBOARD_PRICES_TTL", 300)
+
 # ---------------------------------------------------------------- auto-refuel USDC da ETH
 AUTO_SWAP_ETH_TO_USDC = _b("AUTO_SWAP_ETH_TO_USDC", True)
 ETH_GAS_RESERVE = _f("ETH_GAS_RESERVE", 0.003)
