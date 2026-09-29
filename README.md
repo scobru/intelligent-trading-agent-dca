@@ -1,51 +1,64 @@
 # Intelligent Trading Agent - DCA & Portfolio Rebalancer (Base L2)
 
-> ⚠️ **Software sperimentale, non consulenza finanziaria.** Il bot opera con denaro reale su Base e può perdere in parte o del tutto il capitale che gli affidi. Parti in paper trading o dry-run; in live usa un wallet dedicato e solo importi che puoi permetterti di perdere. Dettagli nella sezione **Avvertenza** in fondo.
+**English** · [Italiano](README.it.md)
 
-Agente autonomo di **Dollar-Cost Averaging (DCA)** e **Ribilanciamento di Portafoglio** attivo su rete **Base (Chain ID 8453)** con integrazione **Uniswap V3**, modulazione dinamica tramite **Crypto Fear & Greed Index** e ragionamento assistito da **LLM (OpenRouter)**.
+> ⚠️ **Experimental software, not financial advice.** The bot trades real money on Base and can lose some or all of the capital you give it. Start with paper trading or dry-run; when you go live, use a dedicated wallet and only amounts you can afford to lose. See the **Disclaimer** section at the bottom.
 
-Parte della suite di trading agent modulari per Base (`intelligent-trading-agent`, `intelligent-trading-agent-neutral`, `intelligent-trading-agent-degen`, `intelligent-trading-agent-yield`, `intelligent-trading-agent-dca`, `intelligent-trading-agent-lp`).
+An autonomous **Dollar-Cost Averaging (DCA)** and **portfolio rebalancing**
+agent on **Base (chain ID 8453)**, with **Uniswap V3** execution, sizing
+modulated by the **Crypto Fear & Greed Index** and reasoning assisted by an
+**LLM (OpenRouter)**.
 
----
-
-## Caratteristiche Principali
-
-1. **DCA Dinamico Guidato dal Sentiment (Fear & Greed)**:
-   - Interroga l'API ufficiale di Alternative.me Crypto Fear & Greed.
-   - **Extreme Fear ($\le 25$)**: Aumenta l'acquisto a **$1.50\times$** (compra il panico / dip).
-   - **Fear ($26-45$)**: Acquisto a **$1.25\times$**.
-   - **Neutral ($46-55$)**: Acquisto standard a **$1.00\times$**.
-   - **Greed ($56-75$)**: Riduzione a **$0.75\times$**.
-   - **Extreme Greed ($\ge 76$)**: Riduzione a **$0.50\times$** (cautela nei top di mercato).
-
-2. **Ribilanciamento Multi-Asset con Soglia di Scostamento (Drift)**:
-   - Configurazione pesi flessibile via variabile d'ambiente (es. `TARGET_WEIGHTS=WETH:0.50,CBBTC:0.30,USDC:0.20`).
-   - Monitora la deviazione di ciascun asset rispetto al target.
-   - Se lo scostamento supera la soglia (default $\pm 5\%$) e il controvalore minimo (default $\$10$), calcola la quota ottimale da vendere dagli asset sovrappesati e da acquistare per quelli sottopesati.
-   - Protezione anti-churn: tempo minimo di attesa fra ribilanciamenti (default 12 ore).
-
-3. **Integrazione On-Chain Uniswap V3**:
-   - Routing diretto o via WETH per il miglior prezzo tra i pool V3 su Base (fee tier 0.01%, 0.05%, 0.3%, 1%).
-   - Auto-refuel USDC automatico partendo da riserve ETH native.
-   - Calcolo e verifica dello slippage on-chain con scadenze temporali strette (deadline e gas cap).
-
-4. **Sicurezza Operativa a Tre Livelli**:
-   - `PAPER_TRADING=true`: Simula completamente saldi, esecuzioni di swap, impatto di slippage e fee di gas senza interagire con la blockchain.
-   - `DRY_RUN=true`: Valuta i prezzi on-chain in tempo reale e produce log e decisioni dettagliate, senza firmare alcuna transazione.
-   - `LIVE`: Firma ed invia transazioni reali su Base tramite `BaseClient`.
-
-5. **Interfaccia Web Dashboard & Telegram Bot**:
-   - Dashboard HTTP standalone nativa (nessuna dipendenza da framework pesanti):
-     - Grafico equity in tempo reale.
-     - Gauge visivo Crypto Fear & Greed.
-     - Barre di scostamento (Target vs Current Weight).
-     - Storico acquisti DCA e rebalancing eseguiti.
-     - Pulsante "Esegui ciclo ora" con autenticazione via admin token.
-   - Bot Telegram con comandi `/status`, `/weights`, `/run`, `/help`.
+It is part of the [Intelligent Trading](https://github.com/scobru/intelligent-trading)
+suite of agents for Base.
 
 ---
 
-## Architettura del Sistema
+## Main features
+
+1. **Sentiment-driven dynamic DCA (Fear & Greed)**:
+   - Queries the official Alternative.me Crypto Fear & Greed API.
+   - **Extreme Fear ($\le 25$)**: raises the buy to **$1.50\times$** (buy the panic / dip).
+   - **Fear ($26-45$)**: buys at **$1.25\times$**.
+   - **Neutral ($46-55$)**: standard buy at **$1.00\times$**.
+   - **Greed ($56-75$)**: reduces to **$0.75\times$**.
+   - **Extreme Greed ($\ge 76$)**: reduces to **$0.50\times$** (caution near market tops).
+
+2. **Multi-asset rebalancing with a drift threshold**:
+   - Target weights configurable through an environment variable
+     (e.g. `TARGET_WEIGHTS=WETH:0.25,CBBTC:0.25,LINK:0.15,UNI:0.10,AERO:0.10,USDC:0.15`).
+   - Tracks each asset's deviation from its target.
+   - When the drift exceeds the threshold (default $\pm 5\%$) and the minimum
+     value (default $\$10$), it computes how much to sell from overweight
+     assets and buy for underweight ones.
+   - Anti-churn protection: minimum waiting time between rebalances
+     (default 12 hours).
+
+3. **On-chain Uniswap V3 integration**:
+   - Direct or WETH-routed swaps for the best price across V3 pools on Base
+     (fee tiers 0.01%, 0.05%, 0.3%, 1%).
+   - Automatic USDC refuel from native ETH reserves.
+   - On-chain slippage checks with tight deadlines and a gas cap.
+
+4. **Three safety levels**:
+   - `PAPER_TRADING=true`: fully simulates balances, swap execution, slippage
+     impact and gas fees without touching the blockchain.
+   - `DRY_RUN=true`: reads on-chain prices in real time and produces detailed
+     logs and decisions, without signing any transaction.
+   - `LIVE`: signs and sends real transactions on Base through `BaseClient`.
+
+5. **Web dashboard & Telegram bot**:
+   - Standalone native HTTP dashboard (no heavy frameworks):
+     - real-time equity chart;
+     - Crypto Fear & Greed gauge;
+     - drift bars (target vs current weight);
+     - history of DCA buys and rebalances;
+     - "Run cycle now" button, authenticated with `DASHBOARD_RUN_TOKEN`.
+   - Telegram bot with `/status`, `/weights`, `/run`, `/help` commands.
+
+---
+
+## Architecture
 
 ```
                             ┌────────────────────────┐
@@ -56,73 +69,76 @@ Parte della suite di trading agent modulari per Base (`intelligent-trading-agent
                                         ▼
 ┌────────────────────────┐   ┌────────────────────────┐   ┌────────────────────────┐
 │   Portfolio Tracker    │──>│       DCA Manager      │<──│     OpenRouter LLM     │
-│  (Target vs Actual)    │   │  (Pianificazione Swap) │   │ (Reasoning + Fallback) │
+│  (Target vs Actual)    │   │    (Swap planning)     │   │ (Reasoning + Fallback) │
 └────────────────────────┘   └───────────┬────────────┘   └────────────────────────┘
                                          │
                  ┌───────────────────────┴───────────────────────┐
                  ▼                                               ▼
      ┌───────────────────────┐                       ┌───────────────────────┐
      │      Paper Book       │                       │      Uniswap V3       │
-     │   (Simulazione USD)   │                       │    (Esecuzione Live)  │
+     │   (USD simulation)    │                       │   (Live execution)    │
      └───────────────────────┘                       └───────────────────────┘
 ```
 
 ---
 
-## Installazione e Configurazione
+## Installation and configuration
 
-### 1. Prerequisiti
+### 1. Requirements
 - Python 3.10+
-- Un nodo RPC Base (default `https://mainnet.base.org`)
-- Un wallet con fondi USDC / ETH su Base (opzionale per Paper Trading)
+- A Base RPC node (default `https://mainnet.base.org`)
+- A wallet with USDC / ETH on Base (optional for paper trading)
 
-### 2. Configurazione Ambiente
+### 2. Environment
 ```bash
 cp .env.example .env
 ```
 
-Modifica `.env`:
+Edit `.env`:
 ```ini
 BASE_RPC_URL=https://mainnet.base.org
 WALLET_ADDRESS=0x...
 PRIVATE_KEY=...
-DRY_RUN=false
-PAPER_TRADING=false
+# start safe: set both to false only when you are ready to go live
+DRY_RUN=true
+PAPER_TRADING=true
 
-# Pesi target di portafoglio
-TARGET_WEIGHTS=WETH:0.50,CBBTC:0.30,USDC:0.20
+# Target portfolio weights
+TARGET_WEIGHTS=WETH:0.25,CBBTC:0.25,LINK:0.15,UNI:0.10,AERO:0.10,USDC:0.15
 
-# Importo base per acquisto DCA
+# Base amount per DCA buy
 DCA_BASE_AMOUNT_USD=50.0
 DCA_INTERVAL_HOURS=24.0
 ```
 
-### 3. Installazione Dipendenze
+### 3. Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Avvio
+### 4. Run
 ```bash
 python main.py
 ```
 
-La dashboard web sarà accessibile all'indirizzo `http://localhost:8080`.
+The web dashboard listens on `http://localhost:3000` by default (or on
+`DASHBOARD_PORT` if set; the `.env.example` uses 8080).
 
 ---
 
-## Esecuzione con Docker e CapRover
+## Docker and CapRover
 
 ```bash
 docker build -t intelligent-trading-agent-dca .
-docker run -d --name dca-agent -p 8080:8080 --env-file .env intelligent-trading-agent-dca
+docker run -d --name dca-agent -p 3000:3000 --env-file .env intelligent-trading-agent-dca
 ```
 
-Supporto out-of-the-box per il deployment su **CapRover** tramite `captain-definition`.
+Out-of-the-box support for **CapRover** deployment through
+`captain-definition`.
 
 ---
 
-## Test della Suite
+## Tests
 
 ```bash
 python -m unittest discover tests
@@ -130,23 +146,30 @@ python -m unittest discover tests
 
 ---
 
-## ⚠️ Avvertenza
+## ⚠️ Disclaimer
 
-Questo software è sperimentale ed è fornito "così com'è", senza garanzie di alcun tipo
-(vedi la licenza MIT). Non è consulenza finanziaria né un invito a investire.
+This software is experimental and provided "as is", without warranty of any
+kind (see the MIT license). It is not financial advice nor an invitation to
+invest.
 
-- **Puoi perdere denaro.** Bug, decisioni sbagliate del modello, slippage, exploit dei protocolli,
-  oracoli manipolati e liquidazioni possono far perdere in parte o del tutto il capitale.
-- **Le decisioni le prende un LLM.** Può sbagliare o comportarsi in modo imprevedibile: i limiti
-  dell'esecutore riducono il danno, non lo azzerano. I rendimenti passati, anche in paper, non
-  garantiscono quelli futuri.
-- **Parti in paper o dry-run.** In live usa un wallet dedicato al bot, con importi che puoi
-  permetterti di perdere, e non riutilizzare quella chiave privata altrove.
-- **Proteggi le chiavi.** La chiave privata va solo nelle variabili d'ambiente del deploy: non
-  committarla mai. Senza `DASHBOARD_RUN_TOKEN` i comandi della dashboard restano disattivati:
-  impostalo con un valore lungo e casuale prima di esporla su Internet.
-- **Leggi e tasse.** Sei responsabile del rispetto delle norme e degli obblighi fiscali del tuo paese.
-- **Esposizione al mercato.** Il DCA accumula asset volatili (ETH, cbBTC e altri): il valore del portafoglio segue il mercato e può scendere a lungo.
+- **You can lose money.** Bugs, wrong model decisions, slippage, protocol
+  exploits, manipulated oracles and liquidations can cause the loss of some or
+  all of your capital.
+- **Decisions are made by an LLM.** It can be wrong or behave unpredictably:
+  the executor's limits reduce the damage, they do not eliminate it. Past
+  results, paper ones included, do not guarantee future ones.
+- **Start with paper or dry-run.** When live, use a wallet dedicated to the
+  bot, with amounts you can afford to lose, and never reuse that private key
+  elsewhere.
+- **Protect your keys.** The private key belongs only in the deployment's
+  environment variables: never commit it. Without `DASHBOARD_RUN_TOKEN` the
+  dashboard commands stay disabled: set it to a long random value before
+  exposing the dashboard to the Internet.
+- **Laws and taxes.** You are responsible for complying with the rules and tax
+  obligations of your country.
+- **Market exposure.** DCA accumulates volatile assets (ETH, cbBTC and
+  others): the portfolio's value follows the market and can fall for a long
+  time.
 
-## Licenza
+## License
 MIT
