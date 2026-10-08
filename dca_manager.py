@@ -407,6 +407,7 @@ class DcaManager:
         assets = status.get("portfolio", {}).get("assets", {})
         total_freed = 0.0
         trades = []
+        skipped = []
 
         for sym, data in assets.items():
             if sym == "USDC":
@@ -414,7 +415,9 @@ class DcaManager:
             if target_usdc > 0 and total_freed >= target_usdc:
                 break
             val = float(data.get("value_usd", 0.0))
-            if val < getattr(config, "MIN_TRADE_USD", 5.0):
+            min_usd = getattr(config, "MIN_TRADE_USD", 5.0)
+            if val < min_usd:
+                skipped.append(f"{sym}: ${val:.2f} sotto il minimo di ${min_usd:.2f}")
                 continue
 
             try:
@@ -422,15 +425,23 @@ class DcaManager:
                 if res.get("status") in ("success", "paper"):
                     total_freed += val
                     trades.append({"asset": sym, "freed_usd": val})
+                else:
+                    skipped.append(f"{sym}: {res.get('message') or res.get('status')}")
             except Exception as exc:
                 logger.error("Errore vendita DCA %s -> USDC: %s", sym, exc)
+                skipped.append(f"{sym}: {exc}")
 
         new_status = self.get_status()
         usdc = float(new_status.get("balances", {}).get("USDC", 0.0))
+        message = f"Liberati ${total_freed:.2f} USDC (saldo attuale: ${usdc:.2f})"
+        if skipped:
+            message += " | Non venduti: " + "; ".join(skipped)
         return {
-            "status": "success",
-            "message": f"Liberati ${total_freed:.2f} USDC (saldo attuale: ${usdc:.2f})",
+            # nessuna vendita riuscita = errore visibile, non un finto successo
+            "status": "success" if trades or not skipped else "error",
+            "message": message,
             "released_usd": round(total_freed, 2),
             "usdc_balance": round(usdc, 2),
-            "trades": trades
+            "trades": trades,
+            "skipped": skipped,
         }
