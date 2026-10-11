@@ -120,7 +120,7 @@ HTML = r"""<!DOCTYPE html>
 <title>DCA &amp; Rebalancer Agent</title>
 <link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/dashboard.css?v=4">
+<link rel="stylesheet" href="/static/dashboard.css?v=5">
 <style>
 :root { --primary: #3b82f6; --accent: #60a5fa; }
 .fng-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -133,20 +133,20 @@ HTML = r"""<!DOCTYPE html>
 .tag-ok { background: rgba(59,130,246,0.2); color: #3b82f6; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="/static/dashboard.js?v=4"></script>
+<script src="/static/dashboard.js?v=5"></script>
 </head>
 <body>
 <header class="header">
   <div class="brand">
     <img src="/static/icon.svg" alt="">
     <div>
-      <h1>DCA &amp; Rebalancer <span class="badge b-no" id="mode">…</span> <span class="badge" id="gas-pill" style="font-size:0.8rem; vertical-align:middle; background:rgba(255,255,255,0.08);">⛽ Gas: --</span></h1>
+      <h1>DCA &amp; Rebalancer <span class="badge b-no" id="mode">…</span></h1>
       <p class="tagline">Accumulo dinamico &amp; Ribilanciamento pesi su Base • Fear &amp; Greed • Uniswap V3</p>
     </div>
   </div>
   <div class="header-actions">
     <span class="updated" id="updated"></span>
-    <button class="btn" id="recal-btn" style="background:#4f46e5; border-color:#6366f1; margin-right:6px;">🧠 Ricalibra Pesi AI</button>
+    <button class="btn" id="recal-btn" style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); color: #818cf8; margin-right: 6px;">🧠 Ricalibra Pesi AI</button>
     <button class="btn" id="run">⚡ Esegui ciclo ora</button>
   </div>
 </header>
@@ -156,8 +156,13 @@ HTML = r"""<!DOCTYPE html>
   <div class="paper-grid" id="paper-grid"></div>
 </section>
 
+<section class="card wallet-bar" id="wallet-panel" hidden>
+  <div class="wallet-items" id="wallet-items"></div>
+  <p class="note" id="wallet-note" hidden></p>
+</section>
+
 <section class="stats">
-  <div class="card"><h3>Valore totale portafoglio</h3><div class="value" id="total">--</div><div class="sub" id="total-sub"></div></div>
+  <div class="card"><h3>Valore totale</h3><div class="value" id="total">--</div><div class="sub" id="total-sub"></div></div>
   <div class="card">
     <h3>Crypto Fear &amp; Greed</h3>
     <div class="fng-card">
@@ -169,11 +174,15 @@ HTML = r"""<!DOCTYPE html>
     </div>
   </div>
   <div class="card"><h3>Stato Ribilanciamento</h3><div class="value" id="reb-status">--</div><div class="sub" id="reb-sub">Soglia drift: &plusmn;5%</div></div>
-  <div class="card"><h3>Ultima operazione</h3><div class="value" id="last-op">--</div><div class="sub" id="last-op-time">nessuna operazione registrata</div></div>
+  <div class="card"><h3>Ultima decisione</h3><div class="value" id="last-op">--</div><div class="sub" id="last-op-time">nessuna operazione registrata</div></div>
 </section>
 
 <section class="card section">
-  <div class="card-head"><h2>💼 Andamento capitale</h2></div>
+  <div class="card-head">
+    <div class="tabs" data-tabs="chart">
+      <button class="tab active" data-tab="equity">💼 Andamento capitale</button>
+    </div>
+  </div>
   <div class="chart-box tall"><canvas id="equity"></canvas></div>
 </section>
 
@@ -247,9 +256,9 @@ function renderStatus(s) {
   $('reb-status').textContent = p.needs_rebalance ? '⚠️ Ribilanciamento dovuto' : '✅ In equilibrio';
   $('reb-status').style.color = p.needs_rebalance ? '#ef4444' : '#10b981';
 
-  // Gas reserve pill
-  if (s.gas_eth && s.gas_eth.amount != null) {
-    $('gas-pill').textContent = `⛽ Gas: ${Number(s.gas_eth.amount).toFixed(4)} ETH (${usd(s.gas_eth.value_usd)})`;
+  // Wallet panel
+  if (s.wallet) {
+    ITA.renderWallet(s.mode === 'paper' ? null : s.wallet);
   }
   if ($('weights-sub')) {
     $('weights-sub').textContent = 'AI Allocator: ' + (s.weights_rationale || 'Pesi bilanciati di default');
@@ -390,8 +399,9 @@ function renderOps(ops) {
 }
 
 function renderChart(points) {
+  if (!points || !points.length) return;
   chart = ITA.lineChart(chart, $('equity'), points.map(p => time(p.created_at)), [
-    { label: 'Valore totale ($)', data: points.map(p => p.total_value_usd) }
+    { label: 'Valore totale', data: points.map(p => p.total_value_usd) }
   ]);
 }
 
@@ -489,6 +499,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     status = _status_cache.get(self.manager)
                 status["is_paused"] = db_utils.is_bot_paused()
                 status["pause_info"] = db_utils.get_pause_info()
+
+                # Popola oggetto wallet compatibile con ITA.renderWallet()
+                bals = status.get("balances") or {}
+                pxs = status.get("prices") or {}
+                gas_eth = status.get("gas_eth") or {}
+                eth_amt = float(bals.get("ETH") or gas_eth.get("amount") or 0.0)
+                eth_px = float(pxs.get("ETH") or pxs.get("WETH") or gas_eth.get("price_usd") or 2600.0)
+                eth_usd = gas_eth.get("value_usd")
+                if eth_usd is None and eth_px:
+                    eth_usd = eth_amt * eth_px
+                addr = status.get("wallet") if isinstance(status.get("wallet"), str) else getattr(self.client, "address", "")
+                usdc_val = float(bals.get("USDC") or 0.0)
+                status["wallet"] = {
+                    "address": addr,
+                    "eth": eth_amt,
+                    "eth_usd": eth_usd,
+                    "min_eth": getattr(config, "MIN_ETH_RESERVE", 0.001),
+                    "warn_eth": getattr(config, "GAS_WARN_ETH", 0.002),
+                    "extra": [["USDC nel wallet", f"${usdc_val:,.2f}"]],
+                }
                 self._send_json(200, status)
             except (BrokenPipeError, ConnectionResetError):
                 logger.debug("Client disconnesso durante /api/status")

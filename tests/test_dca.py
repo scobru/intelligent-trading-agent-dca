@@ -426,6 +426,35 @@ class TestBaseClientResilience(unittest.TestCase):
                 server.handle_error(MagicMock(), ("127.0.0.1", 12345))
                 mock_super_handle.assert_not_called()
 
+    def test_dashboard_api_status_wallet_object(self):
+        from dashboard import DashboardHandler
+        handler = DashboardHandler.__new__(DashboardHandler)
+        handler.client = MagicMock()
+        handler.client.address = "0x14D000000000000000000000000000000000FA28"
+        handler.manager = MagicMock()
+        handler.path = "/api/status"
+        sent_data = {}
+        def fake_send_json(status, data):
+            nonlocal sent_data
+            sent_data = data
+        handler._send_json = fake_send_json
+
+        sample_status = {
+            "mode": "live",
+            "balances": {"ETH": 0.05, "USDC": 120.0},
+            "prices": {"ETH": 2600.0, "USDC": 1.0},
+            "gas_eth": {"amount": 0.05, "value_usd": 130.0},
+        }
+        with patch("db_utils.fetch_latest_status", return_value=sample_status), \
+             patch("db_utils.is_bot_paused", return_value=False), \
+             patch("db_utils.get_pause_info", return_value={}):
+            handler.do_GET()
+
+        self.assertIn("wallet", sent_data)
+        self.assertEqual(sent_data["wallet"]["eth"], 0.05)
+        self.assertEqual(sent_data["wallet"]["eth_usd"], 130.0)
+        self.assertEqual(sent_data["wallet"]["extra"], [["USDC nel wallet", "$120.00"]])
+
 
 if __name__ == "__main__":
     unittest.main()
