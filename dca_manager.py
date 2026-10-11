@@ -422,7 +422,7 @@ class DcaManager:
 
             try:
                 res = self._execute_rebalance({"from_asset": sym, "to_asset": "USDC", "amount_usd": val, "reason": "svincolo fondi"}, status)
-                if res.get("status") in ("success", "paper"):
+                if res.get("status") in ("success", "paper", "dry_run"):
                     total_freed += val
                     trades.append({"asset": sym, "freed_usd": val})
                 else:

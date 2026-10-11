@@ -38,6 +38,19 @@ def _b(name: str, default: bool) -> bool:
 CHAIN_ID = 8453
 CHAIN_NAME = "Base"
 BASE_RPC_URL = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
+
+DEFAULT_FALLBACK_RPCS = [
+    "https://mainnet.base.org",
+    "https://base.llamarpc.com",
+    "https://1rpc.io/base",
+    "https://base-rpc.publicnode.com",
+]
+_custom_fallbacks = os.getenv("BASE_FALLBACK_RPCS", "")
+if _custom_fallbacks:
+    BASE_FALLBACK_RPCS = [u.strip() for u in _custom_fallbacks.split(",") if u.strip()]
+else:
+    BASE_FALLBACK_RPCS = DEFAULT_FALLBACK_RPCS
+
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "")
 
@@ -154,9 +167,14 @@ TX_TIMEOUT_SECONDS = _i("TX_TIMEOUT_SECONDS", 180)
 HTTP_TIMEOUT = _i("HTTP_TIMEOUT", 30)
 
 # ---------------------------------------------------------------- limiti RPC
-# Retry con backoff esponenziale su 429 / errori di rete (4 tentativi: attese 0.5, 1, 2 s)
-RPC_RETRIES = _i("RPC_RETRIES", 4)
-RPC_BACKOFF_FACTOR = _f("RPC_BACKOFF_FACTOR", 0.5)
+# Retry con backoff fail-fast verso fallback RPC su 429 / errori di rete
+RPC_MAX_RETRIES = _i("RPC_MAX_RETRIES", _i("RPC_RETRIES", 2))
+RPC_BACKOFF_SECONDS = _f("RPC_BACKOFF_SECONDS", _f("RPC_BACKOFF_FACTOR", 0.5))
+RPC_RETRIES = RPC_MAX_RETRIES
+RPC_BACKOFF_FACTOR = RPC_BACKOFF_SECONDS
+RPC_COOLDOWN_SECONDS = _f("RPC_COOLDOWN_SECONDS", 60.0)
+STATUS_CACHE_TTL_SECONDS = _f("STATUS_CACHE_TTL_SECONDS", 30.0)
+
 # Multicall3 (stesso indirizzo su tutte le chain EVM, Base inclusa)
 MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
 # La dashboard ricalcola /api/status al massimo ogni N secondi (saldi) e i prezzi ogni M

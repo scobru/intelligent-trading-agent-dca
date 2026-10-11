@@ -89,6 +89,8 @@ _status_cache = StatusCache(config.DASHBOARD_STATUS_TTL, config.DASHBOARD_PRICES
 
 
 class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
     def handle_error(self, request, client_address):
         # Il browser ha chiuso la connessione prima della risposta (tab chiusa,
         # refresh, timeout del proxy): niente traceback nei log
@@ -481,39 +483,47 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
             try:
-                status = _status_cache.get(self.manager)
+                status = db_utils.fetch_latest_status()
+                if not status:
+                    status = _status_cache.get(self.manager)
                 status["is_paused"] = db_utils.is_bot_paused()
                 status["pause_info"] = db_utils.get_pause_info()
-                self.wfile.write(json.dumps(status, default=str).encode("utf-8"))
+                self._send_json(200, status)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnesso durante /api/status")
             except Exception as exc:
-                self.wfile.write(json.dumps({"error": str(exc)}).encode("utf-8"))
+                self._send_json(500, {"error": str(exc)})
             return
 
         if path == "/api/snapshots":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            snaps = db_utils.get_recent_snapshots(100)
-            self.wfile.write(json.dumps(snaps, default=str).encode("utf-8"))
+            try:
+                snaps = db_utils.get_recent_snapshots(100)
+                self._send_json(200, snaps)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnesso durante /api/snapshots")
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
             return
 
         if path == "/api/operations":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            ops = db_utils.get_recent_operations(50)
-            self.wfile.write(json.dumps(ops, default=str).encode("utf-8"))
+            try:
+                ops = db_utils.get_recent_operations(50)
+                self._send_json(200, ops)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnesso durante /api/operations")
+            except Exception as exc:
+                self._send_json(500, {"error": str(exc)})
             return
 
         if path == "/" or path == "/index.html":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(HTML.encode("utf-8"))
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(HTML.encode("utf-8"))
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("Client disconnesso durante l'invio della pagina principale")
             return
 
         self.send_error(404)
@@ -522,11 +532,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return dashboard_auth.is_run_token_valid(self.headers, RUN_TOKEN)
 
     def _send_json(self, status: int, data: Any):
-        body = json.dumps(data, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, default=str).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            logger.debug("Client disconnesso prima dell'invio JSON")
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -630,7 +644,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
 def run_dashboard():
     client = BaseClient()
     DashboardHandler.client = client
-    DashboardHandler.manager = DcaManager(client)
+    manager = DcaManager(client)
+    DashboardHandler.manager = manager
+
+    # Se il DB e' vuoto al primo avvio, salva lo stato iniziale per servire la dashboard istantaneamente
+    if not db_utils.fetch_latest_status():
+        try:
+            initial_st = manager.get_status()
+            if initial_st:
+                db_utils.log_snapshot(initial_st)
+        except Exception as exc:
+            logger.debug("Impossibile salvare snapshot iniziale DCA: %s", exc)
 
     server = QuietThreadingHTTPServer(("0.0.0.0", PORT), DashboardHandler)
     print(f"🚀 Dashboard DCA attiva su http://localhost:{PORT}")

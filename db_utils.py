@@ -32,7 +32,8 @@ def init_db():
                 fng_value INTEGER,
                 fng_class TEXT,
                 balances_json TEXT,
-                weights_json TEXT
+                weights_json TEXT,
+                raw_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS operations (
@@ -55,6 +56,10 @@ def init_db():
                 updated_at TEXT NOT NULL
             );
         """)
+        try:
+            conn.execute("ALTER TABLE snapshots ADD COLUMN raw_json TEXT")
+        except Exception:
+            pass
 
 
 def log_snapshot(status: Dict[str, Any]):
@@ -67,8 +72,8 @@ def log_snapshot(status: Dict[str, Any]):
 
         with _connect() as conn:
             conn.execute("""
-                INSERT INTO snapshots (created_at, total_value_usd, fng_value, fng_class, balances_json, weights_json)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO snapshots (created_at, total_value_usd, fng_value, fng_class, balances_json, weights_json, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 now,
                 float(status.get("total_value_usd", 0.0)),
@@ -76,9 +81,26 @@ def log_snapshot(status: Dict[str, Any]):
                 str(fng.get("classification", "")),
                 json.dumps(status.get("balances", {}), default=str),
                 json.dumps({s: a.get("current_weight") for s, a in assets.items()}, default=str),
+                json.dumps(status, default=str),
             ))
     except Exception as exc:
         logger.warning("Errore salvataggio snapshot a DB: %s", exc)
+
+
+def fetch_latest_status() -> Optional[Dict[str, Any]]:
+    """Restituisce l'ultimo stato salvato dal ciclo in SQLite.
+    Se disponibile, evita chiamate RPC dirette da dashboard o Coordinator."""
+    try:
+        init_db()
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT raw_json FROM snapshots WHERE raw_json IS NOT NULL ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if row and row["raw_json"]:
+                return json.loads(row["raw_json"])
+    except Exception as exc:
+        logger.debug("Impossibile recuperare ultimo status DCA da DB: %s", exc)
+    return None
 
 
 def log_operation(action: Dict[str, Any], result: Dict[str, Any]):
